@@ -63,11 +63,14 @@ export default function NuevaVenta({ showToast }) {
   };
 
   const agregarProducto = (p) => {
+    const versiones = Array.isArray(p.versiones) && p.versiones.length > 0 ? p.versiones : [{ etiqueta: p.catalogo_v1 || "v1", precio: p.precio_lista }];
+    const verInicial = versiones[0];
     setSt(s => ({ ...s, nextId: s.nextId + 1, productos: [...s.productos, {
       uid: s.nextId + 1, id: p.id, nombre: p.nombre, variable: p.variable || "",
-      precioLista: p.precio_lista, precioCostoBase: p.precio_costo,
-      pctMin: 0, precioMin: p.precio_lista, pctMay: 0, precioMay: p.precio_lista,
-      precioVenta: p.precio_lista, pctCosto: 0, precioCosto: p.precio_costo,
+      versiones, versionElegida: verInicial,
+      precioLista: verInicial.precio, precioCostoBase: p.precio_costo,
+      pctMin: 0, precioMin: verInicial.precio, pctMay: 0, precioMay: verInicial.precio,
+      precioVenta: verInicial.precio, pctCosto: 0, precioCosto: p.precio_costo,
 cant: 1, esPersonalizado: false, observacion: "",    }]}));
     setSugerenciasProd([]);
   };
@@ -92,6 +95,18 @@ cant: 1, esPersonalizado: false, observacion: "",    }]}));
     const precioCosto = Math.round(precioMin * (1 - p.pctCosto / 100));
     return { ...p, pctMin: pct, precioMin, precioMay, precioCosto, precioVenta: s.tipoCliente === "Mayorista" ? precioMay : precioMin };
   })}));
+
+  const cambiarVersion = (uid, version) => {
+    setSt(s => ({ ...s, productos: s.productos.map(p => {
+      if (p.uid !== uid) return p;
+      const nuevoPrecioLista = version.precio;
+      const precioMin = Math.round(nuevoPrecioLista * (1 - p.pctMin / 100));
+      const precioMay = Math.round(precioMin * (1 - p.pctMay / 100));
+      const precioCosto = Math.round(precioMin * (1 - p.pctCosto / 100));
+      const precioVenta = s.tipoCliente === "Mayorista" ? precioMay : precioMin;
+      return { ...p, versionElegida: version, precioLista: nuevoPrecioLista, precioMin, precioMay, precioCosto, precioVenta };
+    })}));
+  };
 
   const setPctMay = (uid, pct) => setSt(s => ({ ...s, productos: s.productos.map(p => {
     if (p.uid !== uid) return p;
@@ -152,6 +167,7 @@ if (sinCosto) { showToast("⚠️ Completá el precio de costo de todos los prod
         pct_costo:        Number(p.pctCosto)    || 0,
         precio_costo:     Number(p.precioCosto) || 0,
         observacion:      String(p.observacion  || ""),
+        catalogo_usado:   p.versionElegida ? p.versionElegida.etiqueta : "",
       })),
       desc_global_pct: st.descGlobal  || 0,
       desc_global_amt: descAmt        || 0,
@@ -313,7 +329,7 @@ if (sinCosto) { showToast("⚠️ Completá el precio de costo de todos los prod
           <ProductoRow key={p.uid} p={p} esMay={st.tipoCliente === "Mayorista"}
             onRemove={() => quitarProd(p.uid)} onCant={d => cambiarCant(p.uid, d)}
             onPctMin={pct => setPctMin(p.uid, pct)} onPctMay={pct => setPctMay(p.uid, pct)}
-            onPctCosto={pct => setPctCosto(p.uid, pct)} onUpdate={changes => updateProd(p.uid, changes)} />
+            onPctCosto={pct => setPctCosto(p.uid, pct)} onUpdate={changes => updateProd(p.uid, changes)} onCambiarVersion={ver => cambiarVersion(p.uid, ver)} />
         ))}
 
         <button onClick={agregarPersonalizado} style={{ width: "100%", padding: 12, border: "1.5px dashed #1565C0", borderRadius: 10, background: "var(--blue-bg)", color: "var(--blue)", fontSize: 13, fontWeight: 700, cursor: "pointer", marginTop: 8 }}>
@@ -447,7 +463,7 @@ if (sinCosto) { showToast("⚠️ Completá el precio de costo de todos los prod
   );
 }
 
-function ProductoRow({ p, esMay, onRemove, onCant, onPctMin, onPctMay, onPctCosto, onUpdate }) {
+function ProductoRow({ p, esMay, onRemove, onCant, onPctMin, onPctMay, onPctCosto, onUpdate, onCambiarVersion }) {
   function fmt(n) { return Number(n || 0).toLocaleString("es-AR"); }
 
   const rowStyle = { border: "1px solid #F0D6E4", borderRadius: 12, overflow: "hidden", marginBottom: 12 };
@@ -515,6 +531,17 @@ function ProductoRow({ p, esMay, onRemove, onCant, onPctMin, onPctMay, onPctCost
         </div>
         <button onClick={onRemove} style={{ width: 26, height: 26, borderRadius: "50%", border: "none", background: "var(--red-bg)", color: "var(--red)", cursor: "pointer" }}>✕</button>
       </div>
+      {Array.isArray(p.versiones) && p.versiones.length > 1 && (
+        <div style={{ padding: "10px 14px", background: "#F3E5FF", borderBottom: "1px solid #E1BEE7" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#6A1B9A", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 8 }}>📋 Catálogo</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {p.versiones.map((v, vi) => {
+              const activa = p.versionElegida && p.versionElegida.etiqueta === v.etiqueta;
+              return <button key={vi} onClick={() => onCambiarVersion(v)} style={{ padding: "6px 12px", borderRadius: 20, border: "1.5px solid", cursor: "pointer", borderColor: activa ? "#6A1B9A" : "#CE93D8", background: activa ? "#6A1B9A" : "white", color: activa ? "white" : "#6A1B9A", fontSize: 12, fontWeight: 700 }}>{v.etiqueta} — ${fmt(v.precio)}</button>;
+            })}
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 14px", background: "#FFF0F7", borderBottom: "1px solid #F0D6E4" }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase" }}>Precio de lista</span>
         <span style={{ fontFamily: "'Playfair Display',serif", fontSize: 17, color: "var(--rose)", fontWeight: 700 }}>${fmt(p.precioLista)}</span>
