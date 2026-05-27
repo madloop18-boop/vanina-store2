@@ -1,606 +1,586 @@
-import { SkeletonCard, SkeletonRow, skeletonCSS } from "../ui/Skeleton";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
+import { SkeletonCard, skeletonCSS } from "../ui/Skeleton";
 import { api } from "../../lib/api";
 
 function fmt(n) {
   return Number(n || 0).toLocaleString("es-AR");
 }
 
-const PCTS_MIN  = [0,5,10,15,20,25,30,35,40,45,50,55];
-const PCTS_MAY  = [0,5,10,15,20,25,30,35,40,45,50,55];
-const PCTS_COST = [0,5,10,15,20,25,30,35,40,45,50,55,60];
-const METODOS   = [
-  { id:"Efectivo",      icon:"💵", label:"Efectivo" },
-  { id:"Transferencia", icon:"📲", label:"Transf." },
-  { id:"Débito",        icon:"💳", label:"Débito" },
-  { id:"Crédito",       icon:"💳", label:"Crédito" },
-  { id:"Mercado Pago",  icon:"🔵", label:"MercadoPago" },
-  { id:"Fiado",         icon:"🤝", label:"Fiado" },
-];
+const METODOS = ["Efectivo", "Transferencia", "Débito", "Crédito", "Mercado Pago", "Fiado"];
 
-const estadoInicial = () => ({
-  esPedido: false, tipoCliente: "Minorista", descGlobal: 0,
-  metodoPago: "Efectivo", productos: [], nextId: 0,
-});
-
-export default function NuevaVenta({ showToast }) {
-  const [st, setSt]                   = useState(estadoInicial());
-  const [cacheProd, setCacheProd]     = useState([]);
-  const [clienteNombre, setClienteNombre] = useState("");
-  const [clienteTel, setClienteTel]   = useState("");
-  const [nota, setNota]               = useState("");
-  const [montoPagado, setMontoPagado] = useState("");
-  const [sugerenciasCliente, setSugerenciasCliente] = useState([]);
-  const [sugerenciasProd, setSugerenciasProd]       = useState([]);
-  const [guardando, setGuardando]     = useState(false);
-  const [exito, setExito]             = useState(null);
-  const clienteTimer = useRef(null);
-  const prodTimer    = useRef(null);
-
-  useEffect(() => {
-    api.getProductos().then(r => setCacheProd(r.productos || [])).catch(() => {});
-  }, []);
-
-  const onClienteInput = (v) => {
-    setClienteNombre(v);
-    clearTimeout(clienteTimer.current);
-    if (v.length < 2) { setSugerenciasCliente([]); return; }
-    clienteTimer.current = setTimeout(async () => {
-      try { const r = await api.buscarCliente(v); setSugerenciasCliente(r.clientes || []); } catch {}
-    }, 300);
-  };
-
-  const onProdInput = (v) => {
-    clearTimeout(prodTimer.current);
-    if (!v) { setSugerenciasProd([]); return; }
-    prodTimer.current = setTimeout(() => {
-      const ql = v.toLowerCase();
-      setSugerenciasProd(cacheProd.filter(p =>
-        String(p.id).includes(v) || p.nombre.toLowerCase().includes(ql) ||
-        (p.variable && p.variable.toLowerCase().includes(ql))
-      ).slice(0, 8));
-    }, 200);
-  };
-
-  const agregarProducto = (p) => {
-    const versiones = Array.isArray(p.versiones) && p.versiones.length > 0 ? p.versiones : [{ etiqueta: p.catalogo_v1 || "v1", precio: p.precio_lista }];
-    const verInicial = versiones[0];
-    setSt(s => ({ ...s, nextId: s.nextId + 1, productos: [...s.productos, {
-      uid: s.nextId + 1, id: p.id, nombre: p.nombre, variable: p.variable || "",
-      versiones, versionElegida: verInicial,
-      precioLista: verInicial.precio, precioCostoBase: p.precio_costo,
-      pctMin: 0, precioMin: verInicial.precio, pctMay: 0, precioMay: verInicial.precio,
-      precioVenta: verInicial.precio, pctCosto: 0, precioCosto: p.precio_costo,
-cant: 1, esPersonalizado: false, observacion: "",    }]}));
-    setSugerenciasProd([]);
-  };
-
-  const agregarPersonalizado = () => {
-    setSt(s => ({ ...s, nextId: s.nextId + 1, productos: [...s.productos, {
-      uid: s.nextId + 1, id: "CUSTOM-" + (s.nextId + 1), nombre: "Producto Personalizado",
-      variable: "", precioLista: 0, precioCostoBase: 0, pctMin: 0, precioMin: 0,
-      pctMay: 0, precioMay: 0, precioVenta: 0, pctCosto: 0, precioCosto: "",
-      cant: 1, esPersonalizado: true, observacion: "",
-    }]}));
-  };
-
-  const updateProd   = (uid, changes) => setSt(s => ({ ...s, productos: s.productos.map(p => p.uid === uid ? { ...p, ...changes } : p) }));
-  const quitarProd   = (uid) => setSt(s => ({ ...s, productos: s.productos.filter(p => p.uid !== uid) }));
-  const cambiarCant  = (uid, delta) => setSt(s => ({ ...s, productos: s.productos.map(p => p.uid === uid ? { ...p, cant: Math.max(1, p.cant + delta) } : p) }));
-
-  const setPctMin = (uid, pct) => setSt(s => ({ ...s, productos: s.productos.map(p => {
-    if (p.uid !== uid) return p;
-    const precioMin = Math.round(p.precioLista * (1 - pct / 100));
-    const precioMay = Math.round(precioMin * (1 - p.pctMay / 100));
-    const precioCosto = Math.round(precioMin * (1 - p.pctCosto / 100));
-    return { ...p, pctMin: pct, precioMin, precioMay, precioCosto, precioVenta: s.tipoCliente === "Mayorista" ? precioMay : precioMin };
-  })}));
-
-  const cambiarVersion = (uid, version) => {
-    setSt(s => ({ ...s, productos: s.productos.map(p => {
-      if (p.uid !== uid) return p;
-      const nuevoPrecioLista = version.precio;
-      const precioMin = Math.round(nuevoPrecioLista * (1 - p.pctMin / 100));
-      const precioMay = Math.round(precioMin * (1 - p.pctMay / 100));
-      const precioCosto = Math.round(precioMin * (1 - p.pctCosto / 100));
-      const precioVenta = s.tipoCliente === "Mayorista" ? precioMay : precioMin;
-      return { ...p, versionElegida: version, precioLista: nuevoPrecioLista, precioMin, precioMay, precioCosto, precioVenta };
-    })}));
-  };
-
-  const setPctMay = (uid, pct) => setSt(s => ({ ...s, productos: s.productos.map(p => {
-    if (p.uid !== uid) return p;
-    const precioMay = Math.round(p.precioMin * (1 - pct / 100));
-    return { ...p, pctMay: pct, precioMay, precioVenta: precioMay };
-  })}));
-
-  const setPctCosto = (uid, pct) => setSt(s => ({ ...s, productos: s.productos.map(p => {
-    if (p.uid !== uid) return p;
-    return { ...p, pctCosto: pct, precioCosto: Math.round(p.precioMin * (1 - pct / 100)) };
-  })}));
-
-  const setTipoCliente = (tipo) => setSt(s => ({ ...s, tipoCliente: tipo, productos: s.productos.map(p => ({ ...p, precioVenta: tipo === "Mayorista" ? p.precioMay : p.precioMin })) }));
-  const setTipoOperacion = (esPedido) => { setSt(s => ({ ...s, esPedido, metodoPago: esPedido && s.metodoPago === "Fiado" ? "Efectivo" : s.metodoPago })); setMontoPagado(""); };
-
-  const subtotal = st.productos.reduce((s, p) => s + p.precioVenta * p.cant, 0);
-  const descAmt  = Math.round(subtotal * st.descGlobal / 100);
-  const total    = subtotal - descAmt;
-  const monto    = st.metodoPago === "Fiado" ? 0 : (parseFloat(montoPagado) || (st.esPedido ? 0 : total));
-  const saldo    = Math.max(0, total - monto);
-
-const registrar = async () => {
-  const nombreStr = String(clienteNombre || "").trim();
-  const telStr    = String(clienteTel    || "").trim();
-  const notaStr   = String(nota          || "").trim();
-
-  if (!nombreStr)           { showToast("⚠️ Ingresá el nombre del cliente"); return; }
-  if (!telStr)              { showToast("⚠️ Ingresá el teléfono"); return; }
-  if (!st.productos.length) { showToast("⚠️ Agregá al menos un producto"); return; }
-  const sinCosto = st.productos.some(p => !p.precioCosto || p.precioCosto === 0);
-if (sinCosto) { showToast("⚠️ Completá el precio de costo de todos los productos"); return; }
-
-  const montoPag  = st.esPedido
-    ? (parseFloat(montoPagado) || 0)
-    : (st.metodoPago === "Fiado" ? 0 : (parseFloat(montoPagado) || total));
-  const saldoPend = Math.max(0, total - montoPag);
-
-  setGuardando(true);
-  try {
-    await api.registrarVenta({
-      es_pedido:       st.esPedido,
-      cliente_nombre:  nombreStr,
-      cliente_tel:     telStr,
-      tipo_cliente:    st.tipoCliente,
-      productos: st.productos.map(p => ({
-        id_producto:      String(p.id           || ""),
-        nombre:           String(p.nombre       || ""),
-        variable:         String(p.variable     || ""),
-        cantidad:         Number(p.cant)        || 1,
-        precio_lista:     Number(p.precioLista) || 0,
-        pct_minorista:    Number(p.pctMin)      || 0,
-        precio_minorista: Number(p.precioMin)   || 0,
-        pct_mayorista:    Number(p.pctMay)      || 0,
-        precio_mayorista: Number(p.precioMay)   || 0,
-        precio_venta:     Number(p.precioVenta) || 0,
-        desc_ind:         0,
-        subtotal:         (Number(p.precioVenta) || 0) * (Number(p.cant) || 1),
-        pct_costo:        Number(p.pctCosto)    || 0,
-        precio_costo:     Number(p.precioCosto) || 0,
-        observacion:      String(p.observacion  || ""),
-        catalogo_usado:   p.versionElegida ? p.versionElegida.etiqueta : "",
-      })),
-      desc_global_pct: st.descGlobal  || 0,
-      desc_global_amt: descAmt        || 0,
-      total_final:     total          || 0,
-      monto_pagado:    montoPag       || 0,
-      saldo_pendiente: saldoPend      || 0,
-      metodo_pago:     String(st.metodoPago || "Efectivo"),
-      nota:            notaStr,
-    });
-    setExito({ clienteNombre: nombreStr, total, montoPag, saldoPend, esPedido: st.esPedido, productos: st.productos, descAmt, descGlobal: st.descGlobal });
-  } catch (e) {
-    showToast("❌ Error: " + e.message);
-  } finally {
-    setGuardando(false);
-  }
-};
-
-  const nuevaVenta = () => {
-    setSt(estadoInicial()); setClienteNombre(""); setClienteTel(""); setNota(""); setMontoPagado("");
-    setSugerenciasCliente([]); setSugerenciasProd([]); setExito(null);
-  };
-
-  const card  = { background: "var(--surface-2)", borderRadius: 14, padding: 20, marginBottom: 14, border: "1px solid #F0D6E4", boxShadow: "0 1px 3px rgba(233,30,140,0.06)" };
-  const label = { display: "block", fontSize: 11, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 6 };
-  const input = { width: "100%", padding: "11px 16px", border: "1px solid #F0D6E4", borderRadius: 10, fontSize: 14, fontFamily: "'DM Sans',sans-serif", color: "var(--text)", background: "var(--surface-2)", outline: "none" };
-  const sectionTitle = { fontSize: 11, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 14 };
-
-  // PANTALLA ÉXITO
-  if (exito) {
-    return (
-      <div style={{ padding: "40px 32px", maxWidth: 600, margin: "0 auto", textAlign: "center" }} className="tab-padding">
-        <div style={{ fontSize: 56, marginBottom: 16 }}>{exito.esPedido ? "📦" : "🎉"}</div>
-        <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: 24, color: "var(--rose)", marginBottom: 8 }}>
-          {exito.esPedido ? "¡Pedido registrado!" : "¡Venta registrada!"}
-        </h2>
-        <p style={{ color: "var(--muted-2)", marginBottom: 24 }}>Todo quedó guardado correctamente</p>
-        <div style={{ background: "var(--surface-2)", borderRadius: 14, padding: 20, marginBottom: 24, border: "1px solid #F0D6E4", textAlign: "left" }}>
-          <div style={{ fontWeight: 700, color: "var(--rose)", fontSize: 16, marginBottom: 12 }}>{exito.clienteNombre}</div>
-          {exito.productos.map((p, i) => (
-            <div key={i} style={{ padding: "8px 0", borderBottom: "1px solid #F0D6E4", fontSize: 13 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>#{p.id} {p.nombre}{p.variable ? ` (${p.variable})` : ""} x{p.cant}</span>
-                <span style={{ fontWeight: 600 }}>${fmt(p.precioVenta * p.cant)}</span>
-              </div>
-              {p.observacion && <div style={{ fontSize: 11, color: "var(--muted-2)", marginTop: 2 }}>📝 {p.observacion}</div>}
-            </div>
-          ))}
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 17, paddingTop: 12 }}>
-            <span>Total</span><span>${fmt(exito.total)}</span>
-          </div>
-          {exito.esPedido
-            ? <div style={{ marginTop: 10, padding: "10px 14px", background: "var(--blue-bg)", borderRadius: 10, fontSize: 13, color: "var(--blue)" }}>
-                {exito.montoPag > 0 ? `💵 Seña: $${fmt(exito.montoPag)} — Resta: $${fmt(exito.saldoPend)}` : `📦 A cobrar al entregar: $${fmt(exito.total)}`}
-              </div>
-            : exito.saldoPend > 0 && <div style={{ marginTop: 10, padding: "10px 14px", background: "#FFF3E8", borderRadius: 10, fontSize: 13, color: "#7A3800" }}>⚠️ Saldo pendiente: ${fmt(exito.saldoPend)}</div>
-          }
-        </div>
-        <button onClick={nuevaVenta}
-          style={{ padding: "14px 40px", background: "linear-gradient(135deg,#E91E8C,#B5006E)", color: "white", border: "none", borderRadius: 12, fontWeight: 700, fontSize: 16, cursor: "pointer" }}>
-          ➕ Nueva venta
-        </button>
-        <style>{`@media(max-width:768px){.tab-padding{padding:16px!important}}`}</style>
-      </div>
-    );
-  }
-
+// ── Modal de Confirmación ──────────────────────────────────────
+function ModalConfirm({ mensaje, onConfirm, onCancel }) {
   return (
-    <div style={{ padding: "28px 32px 120px", maxWidth: 680, margin: "0 auto" }} className="tab-padding">
-
-      {/* TIPO OPERACIÓN */}
-      <div style={card}>
-        <div style={sectionTitle}>⚡ Tipo de operación</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          {[{ es: false, icon:"🛍️", label:"Venta directa", sub:"Entrega en el momento" },
-            { es: true,  icon:"📦", label:"Pedido",         sub:"Lo entregás después" }].map(op => (
-            <button key={String(op.es)} onClick={() => setTipoOperacion(op.es)} style={{
-              padding: "14px 8px", borderRadius: 12, cursor: "pointer", textAlign: "center", border: "1.5px solid",
-              borderColor: (!op.es && !st.esPedido) ? "var(--green)" : (op.es && st.esPedido) ? "var(--blue)" : "var(--border)",
-              background:  (!op.es && !st.esPedido) ? "var(--green-bg)" : (op.es && st.esPedido) ? "var(--blue-bg)" : "var(--surface-2)",
-            }}>
-              <span style={{ fontSize: 22, display: "block", marginBottom: 4 }}>{op.icon}</span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: (!op.es && !st.esPedido) ? "var(--green-dark)" : (op.es && st.esPedido) ? "var(--blue)" : "var(--muted-2)" }}>{op.label}</span>
-              <span style={{ fontSize: 10, display: "block", color: "var(--muted-2)", marginTop: 2 }}>{op.sub}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* CLIENTE */}
-      <div style={card}>
-        <div style={sectionTitle}>👤 Datos del cliente</div>
-        <div style={{ marginBottom: 12, position: "relative" }}>
-          <label style={label}>Nombre y apellido</label>
-          <input type="text" placeholder="Buscar o escribir nombre..." value={clienteNombre}
-            onChange={e => onClienteInput(e.target.value)}
-            onBlur={() => setTimeout(() => setSugerenciasCliente([]), 200)}
-            style={input} />
-          {sugerenciasCliente.length > 0 && (
-            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "var(--surface-2)", border: "1px solid #F0D6E4", borderRadius: 12, boxShadow: "0 8px 32px rgba(233,30,140,0.12)", zIndex: 100, maxHeight: 200, overflowY: "auto" }}>
-              {sugerenciasCliente.map((c, i) => (
-                <div key={i} onClick={() => { setClienteNombre(c.nombre); setClienteTel(c.tel); setSugerenciasCliente([]); }}
-                  style={{ padding: "12px 16px", cursor: "pointer", borderBottom: "1px solid #F0D6E4", fontSize: 14 }}>
-                  <div style={{ fontWeight: 700 }}>{c.nombre}</div>
-                  <div style={{ fontSize: 11, color: "var(--muted-2)" }}>{c.tel} · {c.tipo}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div style={{ marginBottom: 12 }}>
-          <label style={label}>Teléfono</label>
-          <input type="tel" placeholder="11 1234-5678" value={clienteTel} onChange={e => setClienteTel(e.target.value)} style={input} />
-        </div>
-        <div>
-          <label style={label}>Tipo de cliente</label>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {[{ tipo:"Minorista", icon:"🛍️", ac:"var(--rose)", ab:"var(--rose-soft)" },
-              { tipo:"Mayorista", icon:"📦", ac:"#4527A0", ab:"#EDE7F6" }].map(t => (
-              <button key={t.tipo} onClick={() => setTipoCliente(t.tipo)} style={{
-                padding: "12px", borderRadius: 10, cursor: "pointer", textAlign: "center", border: "1.5px solid",
-                borderColor: st.tipoCliente === t.tipo ? t.ac : "var(--border)",
-                background:  st.tipoCliente === t.tipo ? t.ab : "var(--surface-2)",
-              }}>
-                <span style={{ fontSize: 20, display: "block", marginBottom: 4 }}>{t.icon}</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: st.tipoCliente === t.tipo ? t.ac : "var(--muted-2)" }}>{t.tipo}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* PRODUCTOS */}
-      <div style={card}>
-        <div style={sectionTitle}>🛒 Productos</div>
-        <div style={{ marginBottom: 12, position: "relative" }}>
-          <label style={label}>Buscar por ID o nombre</label>
-          <input type="text" placeholder="Ej: 123 o Perfume..."
-            onChange={e => onProdInput(e.target.value)}
-            onBlur={() => setTimeout(() => setSugerenciasProd([]), 200)}
-            style={input} />
-          {sugerenciasProd.length > 0 && (
-            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "var(--surface-2)", border: "1px solid #F0D6E4", borderRadius: 12, boxShadow: "0 8px 32px rgba(233,30,140,0.12)", zIndex: 100, maxHeight: 220, overflowY: "auto" }}>
-              {sugerenciasProd.map((p, i) => (
-                <div key={i} onClick={() => agregarProducto(p)}
-                  style={{ padding: "12px 16px", cursor: "pointer", borderBottom: "1px solid #F0D6E4", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "var(--rose)" }}>#{p.id}</div>
-                    <div style={{ fontSize: 14 }}>{p.nombre}</div>
-                    {p.variable && <div style={{ fontSize: 11, color: "var(--muted-2)" }}>{p.variable}</div>}
-                  </div>
-                  <span style={{ fontWeight: 700, color: "var(--rose)" }}>${fmt(p.precio_lista)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {st.productos.map(p => (
-          <ProductoRow key={p.uid} p={p} esMay={st.tipoCliente === "Mayorista"}
-            onRemove={() => quitarProd(p.uid)} onCant={d => cambiarCant(p.uid, d)}
-            onPctMin={pct => setPctMin(p.uid, pct)} onPctMay={pct => setPctMay(p.uid, pct)}
-            onPctCosto={pct => setPctCosto(p.uid, pct)} onUpdate={changes => updateProd(p.uid, changes)} onCambiarVersion={ver => cambiarVersion(p.uid, ver)} />
-        ))}
-
-        <button onClick={agregarPersonalizado} style={{ width: "100%", padding: 12, border: "1.5px dashed #1565C0", borderRadius: 10, background: "var(--blue-bg)", color: "var(--blue)", fontSize: 13, fontWeight: 700, cursor: "pointer", marginTop: 8 }}>
-          ✏️ Producto personalizado
-        </button>
-      </div>
-
-      {/* DESCUENTO */}
-      <div style={card}>
-        <div style={sectionTitle}>🏷️ Descuento general</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {[0,5,10,15,20,25,30,35,40,45,50].map(pct => (
-            <button key={pct} onClick={() => setSt(s => ({ ...s, descGlobal: pct }))} style={{
-              padding: "7px 14px", borderRadius: 20, border: "1.5px solid", fontSize: 13, fontWeight: 600, cursor: "pointer",
-              borderColor: st.descGlobal === pct ? "var(--rose)" : "var(--border)",
-              background:  st.descGlobal === pct ? "var(--rose)" : "var(--surface-2)",
-              color:       st.descGlobal === pct ? "var(--surface-2)"   : "var(--muted-2)",
-            }}>{pct}%</button>
-          ))}
-        </div>
-      </div>
-
-      {/* PAGO */}
-      <div style={card}>
-        <div style={sectionTitle}>💳 Método de pago</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 14 }}>
-          {METODOS.map(m => (
-            <button key={m.id} disabled={st.esPedido && m.id === "Fiado"}
-              onClick={() => setSt(s => ({ ...s, metodoPago: m.id }))} style={{
-                padding: "10px 6px", borderRadius: 10, cursor: "pointer", textAlign: "center", border: "1.5px solid",
-                borderColor: st.metodoPago === m.id ? "var(--rose)" : "var(--border)",
-                background:  st.metodoPago === m.id ? "var(--rose-soft)" : "var(--surface-2)",
-                opacity: st.esPedido && m.id === "Fiado" ? 0.4 : 1,
-              }}>
-              <span style={{ fontSize: 18, display: "block", marginBottom: 3 }}>{m.icon}</span>
-              <span style={{ fontSize: 11, fontWeight: 600, color: st.metodoPago === m.id ? "var(--rose)" : "var(--muted-2)" }}>{m.label}</span>
-            </button>
-          ))}
-        </div>
-        {st.metodoPago === "Fiado" && (
-          <div style={{ background: "#FFF3E8", border: "1px solid #FFD0A8", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#7A3800", marginBottom: 12 }}>
-            ⚠️ El monto se registrará como deuda en DEUDORES
-          </div>
-        )}
-        <label style={label}>{st.esPedido ? "Seña (opcional)" : "Monto que paga ahora"}</label>
-        <input type="number" placeholder={st.esPedido ? "Dejar vacío = sin seña" : "Dejar vacío = pago total"}
-          value={montoPagado} onChange={e => setMontoPagado(e.target.value)}
-          disabled={st.metodoPago === "Fiado"}
-          style={{ ...input, background: st.metodoPago === "Fiado" ? "#f5f5f5" : "var(--surface-2)" }} min="0" />
-        {saldo > 0 && (
-          <div style={{ background: "#FFF3E8", border: "1px solid #FFD0A8", borderRadius: 10, padding: "10px 14px", marginTop: 10, fontSize: 13, color: "#7A3800" }}>
-            ⚠️ Queda pendiente: <strong>${fmt(saldo)}</strong>
-            <span style={{ opacity: 0.7 }}>{st.esPedido ? " — se cobrará al entregar" : " — se registrará en DEUDORES"}</span>
-          </div>
-        )}
-      </div>
-
-      {/* RESUMEN */}
-      {st.productos.length > 0 && (
-        <div style={{ background: "linear-gradient(135deg,#B5006E,#880050)", borderRadius: 14, padding: 20, marginBottom: 14, color: "white" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 14, opacity: 0.8 }}>Resumen del pedido</div>
-          {st.productos.map(p => (
-            <div key={p.uid} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.12)", fontSize: 13 }}>
-              <span>{p.nombre}{p.variable ? ` (${p.variable})` : ""} x{p.cant}</span>
-              <span style={{ fontWeight: 600 }}>${fmt(p.precioVenta * p.cant)}</span>
-            </div>
-          ))}
-          {st.descGlobal > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.12)", fontSize: 13 }}>
-              <span>Desc. {st.descGlobal}%</span><span style={{ color: "#FF8FAB" }}>-${fmt(descAmt)}</span>
-            </div>
-          )}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 12, marginTop: 4 }}>
-            <span style={{ fontSize: 14, opacity: 0.8 }}>Total final</span>
-            <span style={{ fontFamily: "'Playfair Display',serif", fontSize: 32, fontWeight: 700 }}>${fmt(total)}</span>
-          </div>
-        </div>
-      )}
-
-      {/* COBRAR BADGE */}
-      {st.productos.length > 0 && (
-        st.esPedido ? (
-          monto > 0
-            ? <div style={{ background: "var(--blue-bg)", borderRadius: 12, padding: "14px 18px", marginBottom: 14, display: "flex", alignItems: "center", gap: 12, border: "1px solid #BBDEFB" }}>
-                <span style={{ fontSize: 24 }}>💵</span>
-                <div><div style={{ fontSize: 12, color: "var(--blue)", opacity: 0.7 }}>Seña recibida</div>
-                  <div style={{ fontSize: 20, fontWeight: 700, color: "var(--blue)", fontFamily: "'Playfair Display',serif" }}>${fmt(monto)}</div></div>
-              </div>
-            : <div style={{ background: "var(--green-bg)", borderRadius: 12, padding: "14px 18px", marginBottom: 14, display: "flex", alignItems: "center", gap: 12, border: "1px solid #A7E9D5" }}>
-                <span style={{ fontSize: 24 }}>📦</span>
-                <div><div style={{ fontSize: 12, color: "var(--green)", opacity: 0.7 }}>A cobrar al entregar</div>
-                  <div style={{ fontSize: 20, fontWeight: 700, color: "var(--green)", fontFamily: "'Playfair Display',serif" }}>${fmt(total)}</div></div>
-              </div>
-        ) : (
-          <div style={{ background: "var(--green-bg)", borderRadius: 12, padding: "14px 18px", marginBottom: 14, display: "flex", alignItems: "center", gap: 12, border: "1px solid #A7E9D5" }}>
-            <span style={{ fontSize: 24 }}>✅</span>
-            <div><div style={{ fontSize: 12, color: "var(--green)", opacity: 0.7 }}>A cobrar ahora</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: "var(--green)", fontFamily: "'Playfair Display',serif" }}>${fmt(Math.min(monto, total))}</div></div>
-          </div>
-        )
-      )}
-
-      {/* NOTA */}
-      <div style={card}>
-        <div style={sectionTitle}>📝 Nota (opcional)</div>
-        <textarea rows={2} placeholder="Ej: Entregar el martes, color rojo..."
-          value={nota} onChange={e => setNota(e.target.value)}
-          style={{ ...input, resize: "none" }} />
-      </div>
-
-      {/* BTN SUBMIT */}
-      <button onClick={registrar} disabled={guardando} style={{
-        position: "fixed", bottom: 70, left: "50%", transform: "translateX(-50%)",
-        width: "calc(100% - 32px)", maxWidth: 620, padding: 17, borderRadius: 14, border: "none",
-        background: st.esPedido ? "linear-gradient(135deg,#1565C0,#0D47A1)" : "linear-gradient(135deg,#E91E8C,#B5006E)",
-        color: "white", fontSize: 16, fontWeight: 700, cursor: guardando ? "not-allowed" : "pointer",
-        boxShadow: "0 8px 32px rgba(233,30,140,0.3)", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, zIndex: 80,
-        opacity: guardando ? 0.8 : 1,
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 9999, padding: 20,
+    }}>
+      <div style={{
+        background: "var(--surface-2)", borderRadius: 18, padding: "28px 24px",
+        maxWidth: 360, width: "100%", border: "1px solid #F0D6E4",
+        boxShadow: "0 8px 40px rgba(233,30,140,0.18)",
       }}>
-        {guardando
-          ? <><div style={{ width: 18, height: 18, border: "3px solid rgba(255,255,255,0.4)", borderTopColor: "var(--surface-2)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} /> Guardando...</>
-          : st.esPedido ? "📦 Registrar pedido" : "✓ Registrar venta"
-        }
-      </button>
-
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg) } }
-        @media(max-width:768px) { .tab-padding { padding: 16px 16px 120px !important; } }
-      `}</style>
+        <div style={{ fontSize: 36, textAlign: "center", marginBottom: 12 }}>🗑️</div>
+        <p style={{ textAlign: "center", fontSize: 15, color: "var(--text)", marginBottom: 24, lineHeight: 1.5 }}>
+          {mensaje}
+        </p>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onCancel} style={{
+            flex: 1, padding: "12px", borderRadius: 10, border: "1.5px solid #F0D6E4",
+            background: "transparent", color: "var(--text)", fontWeight: 700,
+            fontSize: 14, cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
+          }}>Cancelar</button>
+          <button onClick={onConfirm} style={{
+            flex: 1, padding: "12px", borderRadius: 10, border: "none",
+            background: "linear-gradient(135deg,#e53935,#b71c1c)", color: "white",
+            fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
+          }}>Sí, eliminar</button>
+        </div>
+      </div>
     </div>
   );
 }
 
-function ProductoRow({ p, esMay, onRemove, onCant, onPctMin, onPctMay, onPctCosto, onUpdate, onCambiarVersion }) {
-  function fmt(n) { return Number(n || 0).toLocaleString("es-AR"); }
+// ── Modal de Edición ───────────────────────────────────────────
+function ModalEditar({ venta, onGuardar, onCerrar, showToast }) {
+  const [cliente,  setCliente]  = useState(venta.cliente  || "");
+  const [tel,      setTel]      = useState(venta.tel      || "");
+  const [tipo,     setTipo]     = useState(venta.tipo     || "Minorista");
+  const [metodo,   setMetodo]   = useState(venta.metodo   || "Efectivo");
+  const [pagado,   setPagado]   = useState(String(venta.pagado  || 0));
+  const [total,    setTotal]    = useState(String(venta.total   || 0));
+  const [nota,     setNota]     = useState(venta.nota     || "");
+  const [items,    setItems]    = useState(
+    (venta.items || []).map((it, i) => ({ ...it, _id: i }))
+  );
+  const [guardando, setGuardando] = useState(false);
 
-  const rowStyle = { border: "1px solid #F0D6E4", borderRadius: 12, overflow: "hidden", marginBottom: 12 };
-  const headerStyle = { display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "12px 14px", background: "var(--surface-3)", borderBottom: "1px solid #F0D6E4" };
-  const bodyStyle = { padding: "14px" };
-  const pillBtn = (active, color) => ({
-    padding: "4px 9px", borderRadius: 20, border: "1.5px solid", fontSize: 11, fontWeight: 600, cursor: "pointer",
-    borderColor: active ? color : "var(--border)", background: active ? color : "var(--surface-2)", color: active ? "var(--surface-2)" : "var(--muted-2)",
-  });
-  const controls = { display: "grid", gridTemplateColumns: "auto 1fr 1fr", gap: 8, alignItems: "center", marginTop: 10 };
+  const totalCalc = items.reduce((s, it) => s + (Number(it.subtotal) || 0), 0);
+  const saldoCalc = Math.max(0, totalCalc - Number(pagado || 0));
 
-  if (p.esPersonalizado) {
-    return (
-      <div style={rowStyle}>
-        <div style={headerStyle}>
-          <input type="text" value={p.nombre} onChange={e => onUpdate({ nombre: e.target.value })}
-            style={{ border: "none", background: "transparent", fontSize: 14, fontWeight: 700, width: "100%", outline: "none", fontFamily: "'DM Sans',sans-serif" }}
-            placeholder="Nombre del producto..." />
-          <button onClick={onRemove} style={{ width: 26, height: 26, borderRadius: "50%", border: "none", background: "var(--red-bg)", color: "var(--red)", cursor: "pointer", flexShrink: 0 }}>✕</button>
+  const updateItem = (id, field, val) =>
+    setItems(prev => prev.map(it => {
+      if (it._id !== id) return it;
+      const updated = { ...it, [field]: val };
+      if (field === "cantidad" || field === "precio") {
+        updated.subtotal = (Number(updated.cantidad) || 0) * (Number(updated.precio) || 0);
+      }
+      return updated;
+    }));
+
+  const eliminarItem = (id) => setItems(prev => prev.filter(it => it._id !== id));
+
+  const agregarItem = () => setItems(prev => [
+    ...prev,
+    { _id: Date.now(), nombre: "", variable: "", cantidad: 1, precio: 0, subtotal: 0, observacion: "" }
+  ]);
+
+  const handleGuardar = async () => {
+    if (!cliente.trim()) { showToast("❌ Ingresá el nombre del cliente"); return; }
+    if (items.length === 0) { showToast("❌ Debe haber al menos un producto"); return; }
+    setGuardando(true);
+    try {
+      await onGuardar({
+        id_pedido:       venta.id,
+        cliente_nombre:  cliente.trim(),
+        cliente_tel:     tel.trim(),
+        tipo_cliente:    tipo,
+        metodo_pago:     metodo,
+        monto_pagado:    Number(pagado)    || 0,
+        total_final:     totalCalc,
+        saldo_pendiente: saldoCalc,
+        nota:            nota.trim(),
+        productos: items.map(it => ({
+          nombre:      it.nombre,
+          variable:    it.variable   || "",
+          cantidad:    Number(it.cantidad) || 1,
+          precio:      Number(it.precio)   || 0,
+          subtotal:    Number(it.subtotal) || 0,
+          observacion: it.observacion || "",
+          catalogo_usado: it.catalogo_usado || "",
+        })),
+      });
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const inp = {
+    padding: "10px 14px", border: "1.5px solid #F0D6E4", borderRadius: 10,
+    fontSize: 13, fontFamily: "'DM Sans',sans-serif", color: "var(--text)",
+    background: "var(--surface-3)", outline: "none", width: "100%",
+  };
+  const lbl = {
+    fontSize: 10, fontWeight: 700, color: "var(--muted-2)",
+    textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: 5, display: "block",
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+      display: "flex", alignItems: "flex-start", justifyContent: "center",
+      zIndex: 9999, padding: "16px 12px", overflowY: "auto",
+    }}>
+      <div style={{
+        background: "var(--surface-2)", borderRadius: 18, padding: "24px 20px",
+        maxWidth: 540, width: "100%", border: "1px solid #F0D6E4",
+        boxShadow: "0 8px 40px rgba(233,30,140,0.18)", marginTop: 8,
+      }}>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "var(--rose)", fontFamily: "'Playfair Display',serif" }}>
+            ✏️ Editar venta
+          </h3>
+          <button onClick={onCerrar} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "var(--muted-2)" }}>✕</button>
         </div>
-        <div style={bodyStyle}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
-            {[["Costo","precioCosto"],["Minorista","precioMin"],["Mayorista","precioMay"]].map(([lbl,key]) => (
-              <div key={key}>
-                <label style={{ fontSize: 9, color: key === "precioCosto" ? "var(--red)" : "var(--muted-2)", display: "block", marginBottom: 4, textTransform: "uppercase", fontWeight: key === "precioCosto" ? 700 : 400 }}>
-                  {lbl}{key === "precioCosto" ? " *" : ""}
-                </label>
-                <input type="number" value={p[key]}
-                  onChange={e => { const val = parseFloat(e.target.value)||0; const ch={[key]:val}; if(key==="precioMin"||key==="precioMay") ch.precioVenta=esMay?(key==="precioMay"?val:p.precioMay):(key==="precioMin"?val:p.precioMin); onUpdate(ch); }}
-                  placeholder="0"
-                  style={{ width: "100%", padding: 10, border: `1px solid ${key === "precioCosto" && (!p[key] || p[key] <= 0) ? "var(--red)" : "var(--border)"}`, borderRadius: 8, textAlign: "center", fontSize: 14, fontFamily: "'DM Sans',sans-serif", outline: "none" }} />
+
+        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted-2)", letterSpacing: "0.8px", marginBottom: 12, textTransform: "uppercase" }}>
+          🔖 {venta.id}
+        </div>
+
+        {/* Datos del cliente */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+          <div style={{ gridColumn: "1/-1" }}>
+            <label style={lbl}>Cliente</label>
+            <input style={inp} value={cliente} onChange={e => setCliente(e.target.value)} />
+          </div>
+          <div>
+            <label style={lbl}>Teléfono</label>
+            <input style={inp} value={tel} onChange={e => setTel(e.target.value)} />
+          </div>
+          <div>
+            <label style={lbl}>Tipo</label>
+            <select style={inp} value={tipo} onChange={e => setTipo(e.target.value)}>
+              <option>Minorista</option>
+              <option>Mayorista</option>
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Método de pago</label>
+            <select style={inp} value={metodo} onChange={e => setMetodo(e.target.value)}>
+              {METODOS.map(m => <option key={m}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Monto pagado</label>
+            <input style={inp} type="number" value={pagado} onChange={e => setPagado(e.target.value)} />
+          </div>
+        </div>
+
+        {/* Productos */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <span style={{ ...lbl, margin: 0 }}>Productos</span>
+            <button onClick={agregarItem} style={{
+              fontSize: 11, fontWeight: 700, color: "var(--rose)", background: "var(--surface-3)",
+              border: "1px solid #F0D6E4", borderRadius: 8, padding: "5px 12px", cursor: "pointer",
+            }}>+ Agregar</button>
+          </div>
+
+          {items.map(it => (
+            <div key={it._id} style={{
+              background: "var(--surface-3)", borderRadius: 10, padding: "12px",
+              marginBottom: 8, border: "1px solid #F0D6E4",
+            }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                <div style={{ gridColumn: "1/-1" }}>
+                  <label style={lbl}>Nombre del producto</label>
+                  <input style={inp} value={it.nombre} onChange={e => updateItem(it._id, "nombre", e.target.value)} />
+                </div>
+                <div>
+                  <label style={lbl}>Variable</label>
+                  <input style={inp} value={it.variable || ""} onChange={e => updateItem(it._id, "variable", e.target.value)} placeholder="Color, talle..." />
+                </div>
+                <div>
+                  <label style={lbl}>Observación</label>
+                  <input style={inp} value={it.observacion || ""} onChange={e => updateItem(it._id, "observacion", e.target.value)} />
+                </div>
+                <div>
+                  <label style={lbl}>Cantidad</label>
+                  <input style={inp} type="number" min="1" value={it.cantidad} onChange={e => updateItem(it._id, "cantidad", e.target.value)} />
+                </div>
+                <div>
+                  <label style={lbl}>Precio unitario</label>
+                  <input style={inp} type="number" value={it.precio || Math.round((Number(it.subtotal)||0)/(Number(it.cantidad)||1))} onChange={e => updateItem(it._id, "precio", e.target.value)} />
+                </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "var(--rose)" }}>
+                  Subtotal: ${fmt(it.subtotal)}
+                </span>
+                <button onClick={() => eliminarItem(it._id)} style={{
+                  fontSize: 11, color: "#e53935", background: "none", border: "1px solid #ffcdd2",
+                  borderRadius: 7, padding: "4px 10px", cursor: "pointer",
+                }}>🗑️ Quitar</button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Nota */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={lbl}>Nota</label>
+          <textarea style={{ ...inp, resize: "vertical", minHeight: 60 }} value={nota} onChange={e => setNota(e.target.value)} />
+        </div>
+
+        {/* Resumen */}
+        <div style={{ background: "var(--surface-3)", borderRadius: 10, padding: "12px 14px", marginBottom: 18, border: "1px solid #F0D6E4" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+            <span style={{ color: "var(--muted-2)" }}>Total calculado:</span>
+            <span style={{ fontWeight: 700, color: "var(--rose)" }}>${fmt(totalCalc)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+            <span style={{ color: "var(--muted-2)" }}>Pagado:</span>
+            <span style={{ fontWeight: 700, color: "var(--green)" }}>${fmt(pagado)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+            <span style={{ color: "var(--muted-2)" }}>Saldo pendiente:</span>
+            <span style={{ fontWeight: 700, color: saldoCalc > 0 ? "var(--red)" : "var(--green)" }}>${fmt(saldoCalc)}</span>
+          </div>
+        </div>
+
+        {/* Botones */}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onCerrar} style={{
+            flex: 1, padding: "13px", borderRadius: 10, border: "1.5px solid #F0D6E4",
+            background: "transparent", color: "var(--text)", fontWeight: 700,
+            fontSize: 14, cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
+          }}>Cancelar</button>
+          <button onClick={handleGuardar} disabled={guardando} style={{
+            flex: 2, padding: "13px", borderRadius: 10, border: "none",
+            background: guardando ? "#ccc" : "linear-gradient(135deg,#E91E8C,#B5006E)",
+            color: "white", fontWeight: 700, fontSize: 14,
+            cursor: guardando ? "not-allowed" : "pointer", fontFamily: "'DM Sans',sans-serif",
+          }}>
+            {guardando ? "Guardando..." : "💾 Guardar cambios"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Componente Principal ───────────────────────────────────────
+export default function VentasDirectas({ showToast }) {
+  const [ventas,    setVentas]    = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [filtro,    setFiltro]    = useState("");
+  const [ventaEdit, setVentaEdit] = useState(null);
+  const [ventaBorrar, setVentaBorrar] = useState(null);
+
+  const cargar = async () => {
+    setLoading(true);
+    try {
+      const res = await api.getVentasDirectas();
+      setVentas(res.ventas || []);
+    } catch (e) {
+      showToast("❌ Error al cargar ventas: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { cargar(); }, []);
+
+  const filtradas = filtro.trim()
+    ? ventas.filter(v => v.cliente?.toLowerCase().includes(filtro.toLowerCase()))
+    : ventas;
+
+  const porFecha = filtradas.reduce((acc, v) => {
+    const key = v.fecha || "Sin fecha";
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(v);
+    return acc;
+  }, {});
+
+  const totalVentas    = ventas.reduce((s, v) => s + (Number(v.total)  || 0), 0);
+  const totalCobrado   = ventas.reduce((s, v) => s + (Number(v.pagado) || 0), 0);
+  const totalPendiente = ventas.reduce((s, v) => s + (Number(v.saldo)  || 0), 0);
+
+  // ── Eliminar ──
+  const handleEliminar = async () => {
+    if (!ventaBorrar) return;
+    try {
+      await api.eliminarVenta({ id_pedido: ventaBorrar.id });
+      showToast("✅ Venta eliminada");
+      setVentaBorrar(null);
+      cargar();
+    } catch (e) {
+      showToast("❌ Error: " + e.message);
+      setVentaBorrar(null);
+    }
+  };
+
+  // ── Editar / Guardar ──
+  const handleGuardar = async (payload) => {
+    try {
+      // 1) Eliminar venta vieja
+      await api.eliminarVenta({ id_pedido: payload.id_pedido });
+
+      // 2) Re-crear con los nuevos datos
+      await api.registrarVenta({
+        es_pedido:       false,
+        cliente_nombre:  payload.cliente_nombre,
+        cliente_tel:     payload.cliente_tel,
+        tipo_cliente:    payload.tipo_cliente,
+        productos: payload.productos.map(p => ({
+          id_producto:      p.id_producto || "EDIT",
+          nombre:           p.nombre,
+          variable:         p.variable    || "",
+          cantidad:         Number(p.cantidad)  || 1,
+          precio_lista:     Number(p.precio)    || 0,
+          pct_minorista:    0,
+          precio_minorista: Number(p.precio)    || 0,
+          pct_mayorista:    0,
+          precio_mayorista: Number(p.precio)    || 0,
+          precio_venta:     Number(p.precio)    || 0,
+          desc_ind:         0,
+          subtotal:         Number(p.subtotal)  || 0,
+          pct_costo:        0,
+          precio_costo:     0,
+          observacion:      p.observacion       || "",
+          catalogo_usado:   p.catalogo_usado    || "",
+        })),
+        desc_global_pct: 0,
+        desc_global_amt: 0,
+        total_final:     payload.total_final,
+        monto_pagado:    payload.monto_pagado,
+        saldo_pendiente: payload.saldo_pendiente,
+        metodo_pago:     payload.metodo_pago,
+        nota:            payload.nota || "",
+      });
+
+      showToast("✅ Venta actualizada correctamente");
+      setVentaEdit(null);
+      cargar();
+    } catch (e) {
+      showToast("❌ Error al guardar: " + e.message);
+    }
+  };
+
+  return (
+    <div style={{ padding: "28px 32px", maxWidth: 800, margin: "0 auto" }} className="tab-padding">
+      <style>{skeletonCSS}</style>
+
+      {/* MODALES */}
+      {ventaBorrar && (
+        <ModalConfirm
+          mensaje={`¿Eliminás la venta de ${ventaBorrar.cliente}? Esta acción no se puede deshacer.`}
+          onConfirm={handleEliminar}
+          onCancel={() => setVentaBorrar(null)}
+        />
+      )}
+      {ventaEdit && (
+        <ModalEditar
+          venta={ventaEdit}
+          onGuardar={handleGuardar}
+          onCerrar={() => setVentaEdit(null)}
+          showToast={showToast}
+        />
+      )}
+
+      {/* RESUMEN */}
+      {!loading && ventas.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
+          {[
+            { label: "TOTAL VENDIDO",   val: totalVentas,    color: "var(--rose)" },
+            { label: "TOTAL COBRADO",   val: totalCobrado,   color: "var(--green)" },
+            { label: "SALDO PENDIENTE", val: totalPendiente, color: totalPendiente > 0 ? "var(--red)" : "var(--green-dark)" },
+          ].map(s => (
+            <div key={s.label} style={{ background: "var(--surface-2)", borderRadius: 14, padding: "16px 14px", border: "1px solid #F0D6E4" }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 6 }}>
+                {s.label}
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: s.color, fontFamily: "'Playfair Display', serif" }}>
+                ${fmt(s.val)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* BUSCADOR */}
+      <div style={{ position: "relative", marginBottom: 16 }}>
+        <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 15 }}>🔍</span>
+        <input
+          type="text"
+          placeholder="Buscar por cliente..."
+          value={filtro}
+          onChange={e => setFiltro(e.target.value)}
+          style={{
+            width: "100%", padding: "12px 16px 12px 42px",
+            border: "1.5px solid #F0D6E4", borderRadius: 12, fontSize: 14,
+            fontFamily: "'DM Sans',sans-serif", outline: "none", background: "var(--surface-2)",
+          }}
+        />
+        {filtro && (
+          <button onClick={() => setFiltro("")} style={{
+            position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
+            border: "none", background: "none", cursor: "pointer", fontSize: 18, color: "var(--muted-2)",
+          }}>✕</button>
+        )}
+      </div>
+
+      {/* ACTUALIZAR */}
+      <button onClick={cargar} style={{
+        width: "100%", padding: "11px", background: "var(--surface-2)",
+        border: "1px solid #F0D6E4", borderRadius: 12,
+        fontWeight: 700, fontSize: 13, color: "var(--rose)",
+        cursor: "pointer", marginBottom: 20, fontFamily: "'DM Sans',sans-serif",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+      }}>
+        🔄 Actualizar ventas
+      </button>
+
+      {loading ? (
+        Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} lines={3} />)
+      ) : filtradas.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "60px 0", color: "var(--muted-2)" }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>🛍️</div>
+          <p style={{ fontSize: 15 }}>{filtro ? "Sin resultados para esa búsqueda" : "No hay ventas registradas"}</p>
+        </div>
+      ) : (
+        Object.entries(porFecha).map(([fecha, items]) => (
+          <div key={fecha}>
+            {/* SEPARADOR FECHA */}
+            <div style={{
+              fontSize: 11, fontWeight: 700, color: "var(--muted-2)",
+              textTransform: "uppercase", letterSpacing: "0.8px",
+              marginBottom: 10, marginTop: 4,
+              display: "flex", alignItems: "center", gap: 8,
+            }}>
+              <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+              📅 {fecha}
+              <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+            </div>
+
+            {items.map((v, i) => (
+              <div key={i} style={{
+                background: "var(--surface-2)", borderRadius: 14, padding: 20,
+                marginBottom: 12, border: "1px solid #F0D6E4",
+                boxShadow: "0 1px 3px rgba(233,30,140,0.06)",
+              }}>
+                {/* HEADER */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{
+                      width: 40, height: 40, borderRadius: "50%",
+                      background: "linear-gradient(135deg,#E91E8C,#B5006E)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 16, fontWeight: 700, color: "white", flexShrink: 0,
+                    }}>
+                      {v.cliente?.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>{v.cliente}</div>
+                      <div style={{ fontSize: 12, color: "var(--muted-2)", marginTop: 2 }}>
+                        {v.tel ? `📱 ${v.tel}` : ""}{v.tipo ? ` · ${v.tipo}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontWeight: 700, fontSize: 20, color: "var(--rose)", fontFamily: "'Playfair Display', serif" }}>
+                      ${fmt(v.total)}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--muted-2)", marginTop: 2 }}>
+                      {v.metodo || ""}
+                    </div>
+                  </div>
+                </div>
+
+                {/* BADGE */}
+                <div style={{ marginBottom: 10 }}>
+                  {Number(v.saldo) > 0 ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 12px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: "#FFF3E8", color: "#E65100", border: "1px solid #FFD0A8" }}>
+                      ⚠️ Con saldo pendiente
+                    </span>
+                  ) : (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 12px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: "var(--green-bg)", color: "var(--green)", border: "1px solid #A7E9D5" }}>
+                      ✅ Pagado completo
+                    </span>
+                  )}
+                </div>
+
+                {/* ITEMS */}
+                <div style={{ marginBottom: 12 }}>
+                  {(v.items || []).map((it, j) => (
+                    <div key={j} style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+                      padding: "8px 12px", marginBottom: 4, borderRadius: 8,
+                      background: "var(--surface-3)", border: "1px solid #F0D6E4",
+                    }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+                          {it.nombre}{it.variable ? ` (${it.variable})` : ""} x{it.cantidad}
+                          {it.catalogo_usado ? <span style={{ marginLeft: 6, fontSize: 10, color: "var(--muted-2)", background: "var(--surface-2)", padding: "1px 6px", borderRadius: 6, border: "1px solid #F0D6E4" }}>{it.catalogo_usado}</span> : null}
+                        </div>
+                        {it.observacion && (
+                          <div style={{ fontSize: 11, color: "var(--muted-2)", marginTop: 2 }}>📝 {it.observacion}</div>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--rose)", flexShrink: 0, marginLeft: 8 }}>
+                        ${fmt(it.subtotal)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* FOOTER */}
+                <div style={{ paddingTop: 10, borderTop: "1px solid #F0D6E4" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                    <div style={{ fontSize: 13 }}>
+                      <span style={{ color: "var(--muted-2)" }}>Cobrado: </span>
+                      <span style={{ fontWeight: 700, color: "var(--green)" }}>${fmt(v.pagado)}</span>
+                      {Number(v.saldo) > 0 && (
+                        <span style={{ marginLeft: 12, color: "var(--red)", fontWeight: 700 }}>
+                          · Debe: ${fmt(v.saldo)}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--muted-2)" }}>
+                      🔖 {v.id}
+                    </div>
+                  </div>
+                  {v.nota && (
+                    <div style={{ fontSize: 12, color: "var(--muted-2)", marginTop: 6 }}>📝 {v.nota}</div>
+                  )}
+
+                  {/* BOTONES EDITAR / BORRAR */}
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <button
+                      onClick={() => setVentaEdit(v)}
+                      style={{
+                        flex: 1, padding: "9px 0", borderRadius: 9,
+                        border: "1.5px solid #F0D6E4", background: "var(--surface-3)",
+                        color: "var(--rose)", fontWeight: 700, fontSize: 13,
+                        cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      }}
+                    >
+                      ✏️ Editar
+                    </button>
+                    <button
+                      onClick={() => setVentaBorrar(v)}
+                      style={{
+                        flex: 1, padding: "9px 0", borderRadius: 9,
+                        border: "1.5px solid #ffcdd2", background: "#fff5f5",
+                        color: "#e53935", fontWeight: 700, fontSize: 13,
+                        cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      }}
+                    >
+                      🗑️ Eliminar
+                    </button>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
-          <input type="text" value={p.observacion} onChange={e => onUpdate({ observacion: e.target.value })}
-            placeholder="📝 Observación (opcional)"
-            style={{ width: "100%", padding: "10px 12px", border: "1px solid #F0D6E4", borderRadius: 8, fontSize: 13, fontFamily: "'DM Sans',sans-serif", outline: "none", marginBottom: 10 }} />
-          <div style={controls}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--surface-3)", borderRadius: 8, padding: "4px 8px", border: "1px solid #F0D6E4" }}>
-              <button onClick={() => onCant(-1)} style={{ width: 26, height: 26, border: "none", background: "var(--rose-soft)", color: "var(--rose)", borderRadius: 6, fontSize: 16, fontWeight: 700, cursor: "pointer" }}>−</button>
-              <span style={{ fontSize: 15, fontWeight: 700, minWidth: 20, textAlign: "center" }}>{p.cant}</span>
-              <button onClick={() => onCant(1)}  style={{ width: 26, height: 26, border: "none", background: "var(--rose-soft)", color: "var(--rose)", borderRadius: 6, fontSize: 16, fontWeight: 700, cursor: "pointer" }}>+</button>
-            </div>
-            <div style={{ background: "var(--surface-2)", borderRadius: 8, padding: "8px 10px", border: "1px solid #F0D6E4", textAlign: "center" }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase" }}>P. unitario</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--rose)" }}>${fmt(p.precioVenta)}</div>
-            </div>
-            <div style={{ background: "var(--rose-soft)", borderRadius: 8, padding: "8px 10px", textAlign: "center" }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: "var(--rose)", textTransform: "uppercase" }}>Subtotal</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--rose)" }}>${fmt(p.precioVenta * p.cant)}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={rowStyle}>
-      <div style={headerStyle}>
-        <div>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--rose)" }}>#{p.id}</div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>{p.nombre}</div>
-          {p.variable && <div style={{ fontSize: 12, color: "var(--muted-2)" }}>{p.variable}</div>}
-        </div>
-        <button onClick={onRemove} style={{ width: 26, height: 26, borderRadius: "50%", border: "none", background: "var(--red-bg)", color: "var(--red)", cursor: "pointer" }}>✕</button>
-      </div>
-      {Array.isArray(p.versiones) && p.versiones.length > 1 && (
-        <div style={{ padding: "10px 14px", background: "#F3E5FF", borderBottom: "1px solid #E1BEE7" }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "#6A1B9A", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 8 }}>📋 Catálogo</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {p.versiones.map((v, vi) => {
-              const activa = p.versionElegida && p.versionElegida.etiqueta === v.etiqueta;
-              return <button key={vi} onClick={() => onCambiarVersion(v)} style={{ padding: "6px 12px", borderRadius: 20, border: "1.5px solid", cursor: "pointer", borderColor: activa ? "#6A1B9A" : "#CE93D8", background: activa ? "#6A1B9A" : "white", color: activa ? "white" : "#6A1B9A", fontSize: 12, fontWeight: 700 }}>{v.etiqueta} — ${fmt(v.precio)}</button>;
-            })}
-          </div>
-        </div>
+        ))
       )}
-      <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 14px", background: "#FFF0F7", borderBottom: "1px solid #F0D6E4" }}>
-        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase" }}>Precio de lista</span>
-        <span style={{ fontFamily: "'Playfair Display',serif", fontSize: 17, color: "var(--rose)", fontWeight: 700 }}>${fmt(p.precioLista)}</span>
-      </div>
-      <div style={bodyStyle}>
-        {/* MINORISTA */}
-        <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase", marginBottom: 5 }}>
-            <span style={{ background: "var(--rose-soft)", color: "var(--rose)", padding: "2px 7px", borderRadius: 20, fontSize: 10 }}>Minorista</span> % sobre lista
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 4 }}>
-            {PCTS_MIN.map(pct => <button key={pct} onClick={() => onPctMin(pct)} style={pillBtn(p.pctMin===pct,"var(--rose)")}>{pct}%</button>)}
-          </div>
-          <div style={{ fontSize: 11, color: "var(--muted-2)", textAlign: "right" }}>Precio minorista: <strong style={{ color: "var(--rose)" }}>${fmt(p.precioMin)}</strong></div>
-        </div>
-        {/* MAYORISTA */}
-        {esMay && (
-          <div style={{ marginBottom: 10, borderTop: "1px solid #F0D6E4", paddingTop: 10 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase", marginBottom: 5 }}>
-              <span style={{ background: "#EDE7F6", color: "#4527A0", padding: "2px 7px", borderRadius: 20, fontSize: 10 }}>Mayorista</span> % adicional
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 4 }}>
-              {PCTS_MAY.map(pct => <button key={pct} onClick={() => onPctMay(pct)} style={pillBtn(p.pctMay===pct,"#4527A0")}>{pct}%</button>)}
-            </div>
-            <div style={{ fontSize: 11, color: "var(--muted-2)", textAlign: "right" }}>Precio mayorista: <strong style={{ color: "#4527A0" }}>${fmt(p.precioMay)}</strong></div>
-          </div>
-        )}
-        {/* COSTO */}
-        <div style={{ marginBottom: 10, borderTop: "1px solid #F0D6E4", paddingTop: 10 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase", marginBottom: 5 }}>
-            <span style={{ background: "#E8F5E9", color: "#2E7D32", padding: "2px 7px", borderRadius: 20, fontSize: 10 }}>Costo</span> % descuento sobre minorista
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 4 }}>
-            {PCTS_COST.map(pct => <button key={pct} onClick={() => onPctCosto(pct)} style={pillBtn(p.pctCosto===pct,"#388E3C")}>{pct}%</button>)}
-          </div>
-<div style={{ fontSize: 11, color: p.precioCosto > 0 ? "#2E7D32" : "var(--red)", textAlign: "right", fontWeight: p.precioCosto === 0 ? 700 : 400 }}>
-  {p.precioCosto === 0 ? "⚠️ Costo obligatorio" : <>Precio costo: <strong>${fmt(p.precioCosto)}</strong></>}
-</div>        </div>
-        {/* OBSERVACIÓN */}
-        <input type="text" value={p.observacion} onChange={e => onUpdate({ observacion: e.target.value })}
-          placeholder="📝 Observación (opcional)"
-          style={{ width: "100%", padding: "10px 12px", border: "1px solid #F0D6E4", borderRadius: 8, fontSize: 13, fontFamily: "'DM Sans',sans-serif", outline: "none", marginBottom: 10 }} />
-        {/* CONTROLES */}
-        <div style={controls}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--surface-3)", borderRadius: 8, padding: "4px 8px", border: "1px solid #F0D6E4" }}>
-            <button onClick={() => onCant(-1)} style={{ width: 26, height: 26, border: "none", background: "var(--rose-soft)", color: "var(--rose)", borderRadius: 6, fontSize: 16, fontWeight: 700, cursor: "pointer" }}>−</button>
-            <span style={{ fontSize: 15, fontWeight: 700, minWidth: 20, textAlign: "center" }}>{p.cant}</span>
-            <button onClick={() => onCant(1)}  style={{ width: 26, height: 26, border: "none", background: "var(--rose-soft)", color: "var(--rose)", borderRadius: 6, fontSize: 16, fontWeight: 700, cursor: "pointer" }}>+</button>
-          </div>
-          <div style={{ background: "var(--surface-2)", borderRadius: 8, padding: "8px 10px", border: "1px solid #F0D6E4", textAlign: "center" }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase" }}>P. unitario</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--rose)" }}>${fmt(p.precioVenta)}</div>
-          </div>
-          <div style={{ background: "var(--rose-soft)", borderRadius: 8, padding: "8px 10px", textAlign: "center" }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: "var(--rose)", textTransform: "uppercase" }}>Subtotal</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--rose)" }}>${fmt(p.precioVenta * p.cant)}</div>
-          </div>
-        </div>
-      </div>
+
+      <style>{`@media(max-width:768px){.tab-padding{padding:16px !important;}}`}</style>
     </div>
   );
 }
