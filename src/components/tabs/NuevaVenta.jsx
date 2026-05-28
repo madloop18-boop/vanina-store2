@@ -110,7 +110,7 @@ cant: 1, esPersonalizado: false, observacion: "",    }]}));
   const subtotal = st.productos.reduce((s, p) => s + p.precioVenta * p.cant, 0);
   const descAmt  = Math.round(subtotal * st.descGlobal / 100);
   const total    = subtotal - descAmt;
-  const monto    = st.metodoPago === "Fiado" ? 0 : (parseFloat(montoPagado) || (st.esPedido ? 0 : total));
+  const monto    = st.metodoPago === "Fiado" ? 0 : (montoPagado !== "" ? parseFloat(montoPagado) || 0 : (st.esPedido ? 0 : 0));
   const saldo    = Math.max(0, total - monto);
 
 const registrar = async () => {
@@ -126,7 +126,7 @@ if (sinCosto) { showToast("⚠️ Completá el precio de costo de todos los prod
 
   const montoPag  = st.esPedido
     ? (parseFloat(montoPagado) || 0)
-    : (st.metodoPago === "Fiado" ? 0 : (parseFloat(montoPagado) || total));
+    : (st.metodoPago === "Fiado" ? 0 : (montoPagado !== "" ? parseFloat(montoPagado) || 0 : 0));
   const saldoPend = Math.max(0, total - montoPag);
 
   setGuardando(true);
@@ -359,7 +359,7 @@ if (sinCosto) { showToast("⚠️ Completá el precio de costo de todos los prod
           </div>
         )}
         <label style={label}>{st.esPedido ? "Seña (opcional)" : "Monto que paga ahora"}</label>
-        <input type="number" placeholder={st.esPedido ? "Dejar vacío = sin seña" : "Dejar vacío = pago total"}
+        <input type="number" placeholder={st.esPedido ? "Dejar vacío = sin seña" : "Dejar vacío = no pagó nada (queda en deuda)"}
           value={montoPagado} onChange={e => setMontoPagado(e.target.value)}
           disabled={st.metodoPago === "Fiado"}
           style={{ ...input, background: st.metodoPago === "Fiado" ? "#f5f5f5" : "var(--surface-2)" }} min="0" />
@@ -408,11 +408,19 @@ if (sinCosto) { showToast("⚠️ Completá el precio de costo de todos los prod
                   <div style={{ fontSize: 20, fontWeight: 700, color: "var(--green)", fontFamily: "'Playfair Display',serif" }}>${fmt(total)}</div></div>
               </div>
         ) : (
-          <div style={{ background: "var(--green-bg)", borderRadius: 12, padding: "14px 18px", marginBottom: 14, display: "flex", alignItems: "center", gap: 12, border: "1px solid #A7E9D5" }}>
-            <span style={{ fontSize: 24 }}>✅</span>
-            <div><div style={{ fontSize: 12, color: "var(--green)", opacity: 0.7 }}>A cobrar ahora</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: "var(--green)", fontFamily: "'Playfair Display',serif" }}>${fmt(Math.min(monto, total))}</div></div>
-          </div>
+          montoPagado === "" || monto === 0
+            ? <div style={{ background: "var(--rose-soft)", borderRadius: 12, padding: "14px 18px", marginBottom: 14, display: "flex", alignItems: "center", gap: 12, border: "1px solid var(--rose)" }}>
+                <span style={{ fontSize: 24 }}>⚠️</span>
+                <div>
+                  <div style={{ fontSize: 12, color: "var(--rose)", opacity: 0.8 }}>No pagó nada — queda en deuda</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: "var(--rose)", fontFamily: "'Playfair Display',serif" }}>${fmt(total)}</div>
+                </div>
+              </div>
+            : <div style={{ background: "var(--green-bg)", borderRadius: 12, padding: "14px 18px", marginBottom: 14, display: "flex", alignItems: "center", gap: 12, border: "1px solid #A7E9D5" }}>
+                <span style={{ fontSize: 24 }}>✅</span>
+                <div><div style={{ fontSize: 12, color: "var(--green)", opacity: 0.7 }}>Pagó ahora</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: "var(--green)", fontFamily: "'Playfair Display',serif" }}>${fmt(Math.min(monto, total))}</div></div>
+              </div>
         )
       )}
 

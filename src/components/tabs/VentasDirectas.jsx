@@ -44,13 +44,13 @@ function ModalConfirm({ mensaje, onConfirm, onCancel }) {
 
 // ── Modal de Edición ───────────────────────────────────────────
 function ModalEditar({ venta, onGuardar, onCerrar, showToast }) {
-  const [cliente,  setCliente]  = useState(venta.cliente  || "");
-  const [tel,      setTel]      = useState(venta.tel      || "");
-  const [tipo,     setTipo]     = useState(venta.tipo     || "Minorista");
-  const [metodo,   setMetodo]   = useState(venta.metodo   || "Efectivo");
-  const [pagado,   setPagado]   = useState(String(venta.pagado  || 0));
-  const [total,    setTotal]    = useState(String(venta.total   || 0));
-  const [nota,     setNota]     = useState(venta.nota     || "");
+  const [cliente,  setCliente]  = useState(String(venta.cliente  || ""));
+  const [tel,      setTel]      = useState(String(venta.tel      || ""));
+  const [tipo,     setTipo]     = useState(String(venta.tipo     || "Minorista"));
+  const [metodo,   setMetodo]   = useState(String(venta.metodo   || "Efectivo"));
+  const [pagado,   setPagado]   = useState(String(venta.pagado   || 0));
+  const [total,    setTotal]    = useState(String(venta.total    || 0));
+  const [nota,     setNota]     = useState(String(venta.nota     || ""));
   const [items,    setItems]    = useState(
     (venta.items || []).map((it, i) => ({ ...it, _id: i }))
   );
@@ -321,9 +321,9 @@ export default function VentasDirectas({ showToast }) {
       // 2) Re-crear con los nuevos datos
       await api.registrarVenta({
         es_pedido:       false,
-        cliente_nombre:  payload.cliente_nombre,
-        cliente_tel:     payload.cliente_tel,
-        tipo_cliente:    payload.tipo_cliente,
+        cliente_nombre:  String(payload.cliente_nombre || ""),
+        cliente_tel:     String(payload.cliente_tel    || ""),
+        tipo_cliente:    String(payload.tipo_cliente   || "Minorista"),
         productos: payload.productos.map(p => ({
           id_producto:      p.id_producto || "EDIT",
           nombre:           p.nombre,
