@@ -57,7 +57,7 @@ function ModalEditar({ venta, onGuardar, onCerrar, showToast }) {
   const [guardando, setGuardando] = useState(false);
 
   const totalCalc = items.reduce((s, it) => s + (Number(it.subtotal) || 0), 0);
-  const saldoCalc = Math.max(0, totalCalc - Number(pagado || 0));
+  const saldoCalc = metodo === "Fiado" ? totalCalc : Math.max(0, totalCalc - Number(pagado || 0));
 
   const updateItem = (id, field, val) =>
     setItems(prev => prev.map(it => {
@@ -87,9 +87,9 @@ function ModalEditar({ venta, onGuardar, onCerrar, showToast }) {
         cliente_tel:     tel.trim(),
         tipo_cliente:    tipo,
         metodo_pago:     metodo,
-        monto_pagado:    Number(pagado)    || 0,
+        monto_pagado:    metodo === "Fiado" ? 0 : (Number(pagado) || 0),
         total_final:     totalCalc,
-        saldo_pendiente: saldoCalc,
+        saldo_pendiente: metodo === "Fiado" ? totalCalc : saldoCalc,
         nota:            nota.trim(),
         productos: items.map(it => ({
           nombre:      it.nombre,
