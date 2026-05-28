@@ -158,14 +158,16 @@ function ModalEditar({ venta, onGuardar, onCerrar, showToast }) {
           </div>
           <div>
             <label style={lbl}>Método de pago</label>
-            <select style={inp} value={metodo} onChange={e => setMetodo(e.target.value)}>
+            <select style={inp} value={metodo} onChange={e => { setMetodo(e.target.value); if (e.target.value === "Fiado") setPagado("0"); }}>
               {METODOS.map(m => <option key={m}>{m}</option>)}
             </select>
           </div>
+          {metodo !== "Fiado" && (
           <div>
             <label style={lbl}>Monto pagado</label>
             <input style={inp} type="number" value={pagado} onChange={e => setPagado(e.target.value)} />
           </div>
+          )}
         </div>
 
         {/* Productos */}
@@ -315,40 +317,25 @@ export default function VentasDirectas({ showToast }) {
   // ── Editar / Guardar ──
   const handleGuardar = async (payload) => {
     try {
-      // 1) Eliminar venta vieja
-      await api.eliminarVenta({ id_pedido: payload.id_pedido });
-
-      // 2) Re-crear con los nuevos datos
-      await api.registrarVenta({
-        es_pedido:       false,
+      await api.editarVenta({
+        id_pedido:       payload.id_pedido,
         cliente_nombre:  String(payload.cliente_nombre || ""),
         cliente_tel:     String(payload.cliente_tel    || ""),
         tipo_cliente:    String(payload.tipo_cliente   || "Minorista"),
-        productos: payload.productos.map(p => ({
-          id_producto:      p.id_producto || "EDIT",
-          nombre:           p.nombre,
-          variable:         p.variable    || "",
-          cantidad:         Number(p.cantidad)  || 1,
-          precio_lista:     Number(p.precio)    || 0,
-          pct_minorista:    0,
-          precio_minorista: Number(p.precio)    || 0,
-          pct_mayorista:    0,
-          precio_mayorista: Number(p.precio)    || 0,
-          precio_venta:     Number(p.precio)    || 0,
-          desc_ind:         0,
-          subtotal:         Number(p.subtotal)  || 0,
-          pct_costo:        0,
-          precio_costo:     0,
-          observacion:      p.observacion       || "",
-          catalogo_usado:   p.catalogo_usado    || "",
-        })),
-        desc_global_pct: 0,
-        desc_global_amt: 0,
-        total_final:     payload.total_final,
-        monto_pagado:    payload.monto_pagado,
-        saldo_pendiente: payload.saldo_pendiente,
         metodo_pago:     payload.metodo_pago,
+        monto_pagado:    payload.monto_pagado,
+        total_final:     payload.total_final,
+        saldo_pendiente: payload.saldo_pendiente,
         nota:            payload.nota || "",
+        productos: payload.productos.map(p => ({
+          nombre:         p.nombre,
+          variable:       p.variable       || "",
+          cantidad:       Number(p.cantidad)   || 1,
+          precio:         Number(p.precio)     || 0,
+          subtotal:       Number(p.subtotal)   || 0,
+          observacion:    p.observacion        || "",
+          catalogo_usado: p.catalogo_usado     || "",
+        })),
       });
 
       showToast("✅ Venta actualizada correctamente");
