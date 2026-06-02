@@ -419,26 +419,3 @@ export default function VistaOperaciones() {
     </div>
   );
 }
-
-/*
-══════════════════════════════════════════════════════════
-  INSTRUCCIONES DE INTEGRACIÓN EN App.jsx
-══════════════════════════════════════════════════════════
-
-1. Importar el componente en App.jsx:
-   import VistaOperaciones from "./components/VistaOperaciones";
-
-2. Agregar detección de ruta al inicio del componente App:
-   const esVistaOp = window.location.pathname === "/operaciones";
-   if (esVistaOp) return <VistaOperaciones />;
-
-3. Para abrir en nueva pestaña, agregar un botón en cualquier lado:
-   <button onClick={() => window.open("/operaciones", "_blank")}>
-     🖥️ Vista operaciones
-   </button>
-
-4. En Vercel/vite, asegurarse de que la ruta /operaciones
-   sirva el mismo index.html (SPA routing).
-   En vite.config.js ya está configurado por defecto.
-══════════════════════════════════════════════════════════
-*/
