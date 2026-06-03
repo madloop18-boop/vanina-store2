@@ -47,13 +47,18 @@ function ItemRow({ it, grupo, onCambiar, cargando }) {
     }}>
       <span style={{ fontSize: 16, flexShrink: 0 }}>{estilo.emoji}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text, #F0F0F5)", lineHeight: 1.3 }}>
-          {it.nombre}{it.variable ? ` (${it.variable})` : ""} ×{it.cantidad}
-        </div>
-        {it.observacion && !it.observacion.includes("[ENTREGADO]") && (
-          <div style={{ fontSize: 11, color: "var(--muted, #888)", marginTop: 2 }}>📝 {it.observacion}</div>
-        )}
-        <div style={{ fontSize: 11, color: estilo.color, marginTop: 1, fontWeight: 600 }}>${fmt(it.subtotal)}</div>
+       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text, #F0F0F5)", lineHeight: 1.3 }}>
+  {it.nombre}{it.variable ? ` (${it.variable})` : ""} ×{it.cantidad}
+</div>
+{it.id_producto && (
+  <div style={{ fontSize: 10, color: "var(--muted, #888)", marginTop: 1, fontFamily: "monospace" }}>
+    ID: {it.id_producto}
+  </div>
+)}
+{it.observacion && !it.observacion.includes("[ENTREGADO]") && (
+  <div style={{ fontSize: 11, color: "var(--muted, #888)", marginTop: 2 }}>📝 {it.observacion}</div>
+)}
+<div style={{ fontSize: 11, color: estilo.color, marginTop: 1, fontWeight: 600 }}>${fmt(it.subtotal)}</div>
       </div>
       <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
         {idx > 0 && (
