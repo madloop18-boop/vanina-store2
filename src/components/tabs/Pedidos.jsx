@@ -26,7 +26,6 @@ const ESTADO_EMOJIS = { Pedido: "🟡", Recibido: "📦", Entregado: "✅" };
 function ModalCantidad({ modal, onConfirm, onCancel }) {
   const [cant, setCant] = useState(modal?.maxCant ?? 1);
 
-  // Resetear cuando cambia el ítem
   useEffect(() => {
     setCant(modal?.maxCant ?? 1);
   }, [modal]);
@@ -56,7 +55,6 @@ function ModalCantidad({ modal, onConfirm, onCancel }) {
           {label} <strong style={{ color: "var(--rose)" }}>(máx {maxCant})</strong>
         </div>
 
-        {/* Selector de cantidad */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 20, marginBottom: 24 }}>
           <button
             onClick={() => setCant(c => Math.max(1, c - 1))}
@@ -108,14 +106,263 @@ function ModalCantidad({ modal, onConfirm, onCancel }) {
   );
 }
 
+// ── Modal Ticket completo ────────────────────────────────────────
+// ✅ FIX: muestra TODOS los ítems entregados del grupo (no solo uno),
+// y agrega precio sugerido de venta para mayoristas
+function ModalTicket({ grupo, onClose, showToast }) {
+  if (!grupo) return null;
+
+  const esMayorista = (grupo.tipo || "").toLowerCase() === "mayorista";
+  const itemsEntregados = grupo.items.filter(it =>
+    (it.estado_item || "Pedido") === "Entregado"
+  );
+  // Si no hay nada entregado todavía, mostrar todos igualmente
+  const itemsMostrar = itemsEntregados.length > 0 ? itemsEntregados : grupo.items;
+
+  const fecha = new Date().toLocaleDateString("es-AR", {
+    weekday: "long", year: "numeric", month: "long", day: "numeric",
+  });
+  const hora = new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+
+  const totalEntregado = itemsMostrar.reduce((s, it) => s + (Number(it.subtotal) || 0), 0);
+  const totalSugerido  = esMayorista
+    ? itemsMostrar.reduce((s, it) => {
+        const pm = Number(it.precio_minorista) || 0;
+        return s + (pm > 0 ? pm * (Number(it.cantidad) || 1) : 0);
+      }, 0)
+    : 0;
+
+  const textoWsp = () => {
+    let t = `🌸 *Vanina Store*\n`;
+    t += `📅 ${fecha} · ${hora}\n`;
+    t += `━━━━━━━━━━━━━━━━━━\n`;
+    t += `👤 *${grupo.cliente}*\n\n`;
+    t += `📦 *Detalle entregado:*\n`;
+    itemsMostrar.forEach(it => {
+      const nombreMostrar = (it.nombre || "").toLowerCase().includes("personalizado") && it.observacion
+        ? `${it.nombre} — ${it.observacion}`
+        : it.nombre;
+      t += `• ${nombreMostrar}${it.variable ? ` (${it.variable})` : ""} x${it.cantidad} — $${fmt(it.subtotal)}\n`;
+      if (esMayorista && Number(it.precio_minorista) > 0) {
+        const sugerido = Number(it.precio_minorista) * (Number(it.cantidad) || 1);
+        t += `  💵 _Precio sugerido: $${fmt(sugerido)}_\n`;
+      }
+    });
+    t += `\n💰 *Total: $${fmt(totalEntregado)}*\n`;
+    if (esMayorista && totalSugerido > 0) {
+      t += `💵 *Puede revender en: $${fmt(totalSugerido)}*\n`;
+    }
+    if (grupo.saldo > 0) {
+      t += `⚠️ *Saldo pendiente: $${fmt(grupo.saldo)}*\n`;
+    } else {
+      t += `✅ Pagado\n`;
+    }
+    t += `━━━━━━━━━━━━━━━━━━\n`;
+    t += `¡Gracias! 🌸`;
+    return t;
+  };
+
+  const copiar = () => {
+    navigator.clipboard.writeText(textoWsp());
+    showToast("📋 Ticket copiado");
+  };
+
+  const abrirWsp = () => {
+    const tel = String(grupo.tel || "").replace(/\D/g, "");
+    const msg = encodeURIComponent(textoWsp());
+    window.open(`https://wa.me/${tel}?text=${msg}`, "_blank");
+  };
+
+  const enviarTelegram = async () => {
+    try {
+      await api.enviarTicket({
+        cliente:       grupo.cliente,
+        tel:           grupo.tel,
+        tipo_cliente:  grupo.tipo,
+        items:         itemsMostrar,
+        total:         totalEntregado,
+        saldo:         grupo.saldo,
+      });
+      showToast("🎫 Ticket enviado por Telegram");
+    } catch (e) {
+      showToast("❌ Error: " + e.message);
+    }
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 999,
+      background: "rgba(26,10,18,0.6)", backdropFilter: "blur(4px)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+    }}>
+      <div style={{
+        background: "var(--surface-2)", borderRadius: 20, width: "100%", maxWidth: 440,
+        boxShadow: "0 24px 80px rgba(233,30,140,0.25)",
+        overflow: "hidden", animation: "slideUp 0.25s ease",
+        maxHeight: "90vh", display: "flex", flexDirection: "column",
+      }}>
+        {/* Header */}
+        <div style={{
+          background: "linear-gradient(135deg,#E91E8C,#B5006E)",
+          padding: "20px 24px 16px", color: "white", flexShrink: 0,
+          display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+        }}>
+          <div>
+            <div style={{ fontSize: 13, opacity: 0.8 }}>Ticket de pedido</div>
+            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 700, marginTop: 2 }}>
+              {grupo.cliente}
+            </div>
+            <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+              {itemsMostrar.length} producto{itemsMostrar.length !== 1 ? "s" : ""} entregados
+            </div>
+          </div>
+          <button onClick={onClose} style={{
+            background: "rgba(255,255,255,0.2)", border: "none", color: "white",
+            borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 20,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>×</button>
+        </div>
+
+        {/* Contenido scrollable */}
+        <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }}>
+
+          {/* Lista de ítems */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+              Detalle
+            </div>
+            <div style={{ background: "var(--surface-3)", borderRadius: 12, padding: "10px 14px" }}>
+              {itemsMostrar.map((it, i) => {
+                const precioSugerido = esMayorista && Number(it.precio_minorista) > 0
+                  ? Number(it.precio_minorista) * (Number(it.cantidad) || 1)
+                  : 0;
+                return (
+                  <div key={i} style={{
+                    fontSize: 13, lineHeight: 1.7, color: "var(--text)",
+                    borderBottom: i < itemsMostrar.length - 1 ? "1px solid #F0D6E4" : "none",
+                    paddingBottom: i < itemsMostrar.length - 1 ? 10 : 0,
+                    marginBottom: i < itemsMostrar.length - 1 ? 10 : 0,
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontWeight: 600 }}>
+                        • {it.nombre}{it.variable ? ` (${it.variable})` : ""} x{it.cantidad}
+                      </span>
+                      <span style={{ fontWeight: 700 }}>${fmt(it.subtotal)}</span>
+                    </div>
+                    {it.observacion && (
+                      <div style={{ fontSize: 11, color: "var(--muted-2)", marginLeft: 10 }}>📝 {it.observacion}</div>
+                    )}
+                    {precioSugerido > 0 && (
+                      <div style={{ fontSize: 11, color: "var(--green)", marginLeft: 10, fontWeight: 600 }}>
+                        💵 Precio sugerido venta: ${fmt(precioSugerido)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Totales */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "12px 14px", background: "var(--surface-3)", borderRadius: 10,
+              marginBottom: 8, border: "1px solid #F0D6E4",
+            }}>
+              <span style={{ fontSize: 13, color: "var(--muted-2)" }}>Total</span>
+              <span style={{ fontSize: 20, fontWeight: 700, color: "var(--rose)", fontFamily: "'Playfair Display',serif" }}>
+                ${fmt(totalEntregado)}
+              </span>
+            </div>
+            {esMayorista && totalSugerido > 0 && (
+              <div style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "10px 14px", background: "#F0FBF7", borderRadius: 10,
+                border: "1px solid #A7E9D5", marginBottom: 8,
+              }}>
+                <span style={{ fontSize: 13, color: "var(--green)" }}>💵 Puede revender en</span>
+                <span style={{ fontSize: 16, fontWeight: 700, color: "var(--green)" }}>
+                  ${fmt(totalSugerido)}
+                </span>
+              </div>
+            )}
+            {grupo.saldo > 0 ? (
+              <div style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "10px 14px", background: "#FFF3E8", borderRadius: 10,
+                border: "1px solid #FFD0A8",
+              }}>
+                <span style={{ fontSize: 13, color: "#E65100" }}>⚠️ Saldo pendiente</span>
+                <span style={{ fontSize: 16, fontWeight: 700, color: "#E65100" }}>
+                  ${fmt(grupo.saldo)}
+                </span>
+              </div>
+            ) : (
+              <div style={{
+                padding: "10px 14px", background: "var(--green-bg)", borderRadius: 10,
+                border: "1px solid #A7E9D5", textAlign: "center",
+                fontSize: 13, fontWeight: 700, color: "var(--green)",
+              }}>
+                ✅ Pagado completo
+              </div>
+            )}
+          </div>
+
+          {/* Preview texto WhatsApp */}
+          <div style={{
+            background: "#F0FBF7", border: "1px solid #A7E9D5", borderRadius: 12,
+            padding: "12px 14px", fontSize: 12, color: "#1A5C45", fontFamily: "monospace",
+            whiteSpace: "pre-wrap", marginBottom: 16, maxHeight: 160, overflowY: "auto",
+            lineHeight: 1.6,
+          }}>
+            {textoWsp()}
+          </div>
+
+          {/* Botones */}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={copiar} style={{
+              flex: 1, padding: "12px 0", background: "var(--surface-2)",
+              border: "1.5px solid #E91E8C", borderRadius: 12,
+              fontWeight: 700, fontSize: 13, color: "var(--rose)", cursor: "pointer",
+            }}>
+              📋 Copiar
+            </button>
+            <button onClick={enviarTelegram} style={{
+              flex: 1, padding: "12px 0",
+              background: "linear-gradient(135deg,#0088cc,#006699)",
+              border: "none", borderRadius: 12,
+              fontWeight: 700, fontSize: 13, color: "white", cursor: "pointer",
+            }}>
+              ✈️ Telegram
+            </button>
+            {grupo.tel && (
+              <button onClick={abrirWsp} style={{
+                flex: 1, padding: "12px 0",
+                background: "linear-gradient(135deg,#25D366,#128C7E)",
+                border: "none", borderRadius: 12,
+                fontWeight: 700, fontSize: 13, color: "white", cursor: "pointer",
+              }}>
+                💬 WA
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+      <style>{`@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}`}</style>
+    </div>
+  );
+}
+
 // ────────────────────────────────────────────────────────────────
 
 export default function Pedidos({ showToast }) {
-  const [pedidos, setPedidos]     = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [filtro, setFiltro]       = useState("todos");
-  const [cambiando, setCambiando] = useState({});
-  const [modal, setModal]         = useState(null); // { g, it, estadoNuevo, maxCant }
+  const [pedidos, setPedidos]         = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [filtro, setFiltro]           = useState("todos");
+  const [cambiando, setCambiando]     = useState({});
+  const [modal, setModal]             = useState(null);
+  const [ticketGrupo, setTicketGrupo] = useState(null); // ✅ nuevo: grupo para ticket
 
   const cargar = async () => {
     setLoading(true);
@@ -164,23 +411,18 @@ export default function Pedidos({ showToast }) {
 
   const totalPorCobrar = grupos.reduce((s, g) => s + g.saldo, 0);
 
-  // Abre el modal si la cantidad es > 1, sino ejecuta directo
- const solicitarCambioEstado = (g, it, estadoNuevo) => {
-  // Solo mostrar modal al avanzar (→), no al retroceder (←)
-  // Y solo si es el primer estado (Pedido → Recibido o Pedido → Entregado)
-  // Si ya está dividido (viene de Recibido), entregar todo directamente
-  const estadoActual = it.estado_item || "Pedido";
-  const esAvance = ESTADOS_ITEM.indexOf(estadoNuevo) > ESTADOS_ITEM.indexOf(estadoActual);
-  const esDesdeInicio = estadoActual === "Pedido";
+  const solicitarCambioEstado = (g, it, estadoNuevo) => {
+    const estadoActual = it.estado_item || "Pedido";
+    const esAvance = ESTADOS_ITEM.indexOf(estadoNuevo) > ESTADOS_ITEM.indexOf(estadoActual);
+    const esDesdeInicio = estadoActual === "Pedido";
 
-  if (it.cantidad > 1 && esAvance && esDesdeInicio) {
-    setModal({ g, it, estadoNuevo, maxCant: it.cantidad });
-  } else {
-    ejecutarCambioEstado(g, it, estadoNuevo, it.cantidad);
-  }
-};
+    if (it.cantidad > 1 && esAvance && esDesdeInicio) {
+      setModal({ g, it, estadoNuevo, maxCant: it.cantidad });
+    } else {
+      ejecutarCambioEstado(g, it, estadoNuevo, it.cantidad);
+    }
+  };
 
-  // Ejecuta el cambio real (con cantidad parcial o total)
   const ejecutarCambioEstado = async (g, it, estadoNuevo, cantConfirmada) => {
     setModal(null);
     const key = `${it.id_pedido}-${it.nombre}-${it.variable}`;
@@ -229,15 +471,6 @@ export default function Pedidos({ showToast }) {
     }
   };
 
-  const enviarTicket = async (g) => {
-    try {
-      await api.enviarTicket({ cliente: g.cliente, tel: g.tel, items: g.items, total: g.total, saldo: g.saldo });
-      showToast("🎫 Ticket enviado por Telegram");
-    } catch (e) {
-      showToast("❌ Error: " + e.message);
-    }
-  };
-
   return (
     <div style={{ padding: "28px 32px", maxWidth: 800, margin: "0 auto" }} className="tab-padding">
       <style>{skeletonCSS}</style>
@@ -248,6 +481,15 @@ export default function Pedidos({ showToast }) {
         onConfirm={(cant) => ejecutarCambioEstado(modal.g, modal.it, modal.estadoNuevo, cant)}
         onCancel={() => setModal(null)}
       />
+
+      {/* ✅ MODAL TICKET COMPLETO */}
+      {ticketGrupo && (
+        <ModalTicket
+          grupo={ticketGrupo}
+          onClose={() => setTicketGrupo(null)}
+          showToast={showToast}
+        />
+      )}
 
       {/* RESUMEN */}
       {!loading && grupos.length > 0 && (
@@ -275,7 +517,7 @@ export default function Pedidos({ showToast }) {
               cursor: "pointer", whiteSpace: "nowrap", border: "1.5px solid",
               borderColor: filtro === f.id ? "var(--rose)" : "var(--border)",
               background:  filtro === f.id ? "var(--rose)" : "var(--surface-2)",
-              color:       filtro === f.id ? "var(--surface-2)"   : "var(--muted-2)",
+              color:       filtro === f.id ? "var(--surface-2)" : "var(--muted-2)",
             }}>
             {f.label}
           </button>
@@ -354,18 +596,21 @@ export default function Pedidos({ showToast }) {
                       background: estiloEstado.bg,
                       border: `1px solid ${estiloEstado.border}`,
                     }}>
-                      {/* INFO ITEM */}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
                           {it.nombre}{it.variable ? ` (${it.variable})` : ""} x{it.cantidad}
                         </div>
+                        {it.id_producto && (
+                          <div style={{ fontSize: 10, color: "var(--muted-2)", fontFamily: "monospace", marginTop: 1 }}>
+                            ID: {it.id_producto}
+                          </div>
+                        )}
                         <div style={{ fontSize: 11, color: "var(--muted-2)" }}>${fmt(it.subtotal)}</div>
                         {it.observacion && !it.observacion.includes("[ENTREGADO]") && (
                           <div style={{ fontSize: 11, color: "var(--muted-2)" }}>📝 {it.observacion}</div>
                         )}
                       </div>
 
-                      {/* BADGE ESTADO ITEM */}
                       <span style={{
                         fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 20,
                         background: estiloEstado.bg, color: estiloEstado.color,
@@ -374,7 +619,6 @@ export default function Pedidos({ showToast }) {
                         {ESTADO_EMOJIS[estadoItem]} {estadoItem}
                       </span>
 
-                      {/* BOTONES AVANZAR / RETROCEDER */}
                       <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
                         {idxActual > 0 && (
                           <button
@@ -414,7 +658,6 @@ export default function Pedidos({ showToast }) {
                 </div>
               )}
 
-              {/* NOTA */}
               {g.nota && <div style={{ fontSize: 12, color: "var(--muted-2)", marginBottom: 12 }}>📝 {g.nota}</div>}
 
               {/* FOOTER */}
@@ -433,7 +676,9 @@ export default function Pedidos({ showToast }) {
                     ) : null;
                   })()}
                 </div>
-                <button onClick={() => enviarTicket(g)}
+                {/* ✅ Ahora abre el ModalTicket completo en vez de llamar a api.enviarTicket directo */}
+                <button
+                  onClick={() => setTicketGrupo(g)}
                   style={{ padding: "9px 16px", background: "var(--rose-soft)", color: "var(--rose)", border: "none", borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
                   🎫 Ticket
                 </button>
