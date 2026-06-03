@@ -10,6 +10,7 @@ import Stock          from "./components/tabs/Stock";
 import Pagos          from "./components/tabs/Pagos";
 import HistorialPagos from "./components/tabs/HistorialPagos";
 import VentasDirectas from "./components/tabs/VentasDirectas";
+import VistaOperaciones from "./components/tabs/VistaOperaciones";
 
 const TABS = [
   { id:"dashboard", label:"Inicio",    icon:"⚡" },
@@ -146,6 +147,9 @@ function LoadingScreen({ visible }) {
 
 
 export default function App() {
+  if (window.location.pathname === "/operaciones") {
+    return <VistaOperaciones />;
+  }
   const [activeTab, setActiveTab] = useState("dashboard");
   const [loading, setLoading]     = useState(true);
   const { toast, showToast }      = useToast();
