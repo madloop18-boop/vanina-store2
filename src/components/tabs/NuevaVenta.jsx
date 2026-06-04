@@ -63,19 +63,38 @@ export default function NuevaVenta({ showToast }) {
   };
 
   const agregarProducto = (p) => {
+    // Construir versiones disponibles: v1 = precio_lista, v2+ desde versiones
+    const versiones = [];
+    if (p.precio_lista > 0) {
+      versiones.push({ etiqueta: "v1", precio: p.precio_lista });
+    }
+    if (p.versiones && p.versiones.length > 0) {
+      p.versiones.forEach(v => {
+        if (v.precio > 0 && v.etiqueta !== "v1") {
+          versiones.push({ etiqueta: v.etiqueta || "v2", precio: v.precio });
+        }
+      });
+    }
+    const precioBase = p.precio_lista || 0;
     setSt(s => ({ ...s, nextId: s.nextId + 1, productos: [...s.productos, {
       uid: s.nextId + 1, id: p.id, nombre: p.nombre, variable: p.variable || "",
-      precioLista: p.precio_lista, precioCostoBase: p.precio_costo,
-      pctMin: 0, precioMin: p.precio_lista, pctMay: 0, precioMay: p.precio_lista,
-      precioVenta: p.precio_lista, pctCosto: 0, precioCosto: p.precio_costo,
-cant: 1, esPersonalizado: false, observacion: "",    }]}));
+      precioLista: precioBase,
+      precioListaBase: precioBase, // precio base seleccionado actualmente
+      versionesDisponibles: versiones,
+      versionSeleccionada: "v1",
+      precioCostoBase: p.precio_costo,
+      pctMin: 0, precioMin: precioBase, pctMay: 0, precioMay: precioBase,
+      precioVenta: precioBase, pctCosto: 0, precioCosto: p.precio_costo,
+      cant: 1, esPersonalizado: false, observacion: "",
+    }]}));
     setSugerenciasProd([]);
   };
 
   const agregarPersonalizado = () => {
     setSt(s => ({ ...s, nextId: s.nextId + 1, productos: [...s.productos, {
       uid: s.nextId + 1, id: "CUSTOM-" + (s.nextId + 1), nombre: "Producto Personalizado",
-      variable: "", precioLista: 0, precioCostoBase: 0, pctMin: 0, precioMin: 0,
+      variable: "", precioLista: 0, precioListaBase: 0, versionesDisponibles: [], versionSeleccionada: "v1",
+      precioCostoBase: 0, pctMin: 0, precioMin: 0,
       pctMay: 0, precioMay: 0, precioVenta: 0, pctCosto: 0, precioCosto: "",
       cant: 1, esPersonalizado: true, observacion: "",
     }]}));
@@ -85,9 +104,29 @@ cant: 1, esPersonalizado: false, observacion: "",    }]}));
   const quitarProd   = (uid) => setSt(s => ({ ...s, productos: s.productos.filter(p => p.uid !== uid) }));
   const cambiarCant  = (uid, delta) => setSt(s => ({ ...s, productos: s.productos.map(p => p.uid === uid ? { ...p, cant: Math.max(1, p.cant + delta) } : p) }));
 
+  // ✅ Cambiar versión de precio base
+  const cambiarVersion = (uid, etiqueta) => setSt(s => ({ ...s, productos: s.productos.map(p => {
+    if (p.uid !== uid) return p;
+    const ver = (p.versionesDisponibles || []).find(v => v.etiqueta === etiqueta);
+    if (!ver) return p;
+    const nuevaBase = ver.precio;
+    const precioMin   = Math.round(nuevaBase * (1 - p.pctMin / 100));
+    const precioMay   = Math.round(precioMin * (1 - p.pctMay / 100));
+    const precioCosto = Math.round(precioMin * (1 - p.pctCosto / 100));
+    return {
+      ...p,
+      versionSeleccionada: etiqueta,
+      precioListaBase: nuevaBase,
+      precioLista: nuevaBase,
+      precioMin, precioMay, precioCosto,
+      precioVenta: s.tipoCliente === "Mayorista" ? precioMay : precioMin,
+    };
+  })}));
+
   const setPctMin = (uid, pct) => setSt(s => ({ ...s, productos: s.productos.map(p => {
     if (p.uid !== uid) return p;
-    const precioMin = Math.round(p.precioLista * (1 - pct / 100));
+    const base = p.precioListaBase || p.precioLista;
+    const precioMin = Math.round(base * (1 - pct / 100));
     const precioMay = Math.round(precioMin * (1 - p.pctMay / 100));
     const precioCosto = Math.round(precioMin * (1 - p.pctCosto / 100));
     return { ...p, pctMin: pct, precioMin, precioMay, precioCosto, precioVenta: s.tipoCliente === "Mayorista" ? precioMay : precioMin };
@@ -110,64 +149,64 @@ cant: 1, esPersonalizado: false, observacion: "",    }]}));
   const subtotal = st.productos.reduce((s, p) => s + p.precioVenta * p.cant, 0);
   const descAmt  = Math.round(subtotal * st.descGlobal / 100);
   const total    = subtotal - descAmt;
-  const monto    = st.metodoPago === "Fiado" ? 0 : (montoPagado !== "" ? parseFloat(montoPagado) || 0 : (st.esPedido ? 0 : 0));
+  const monto    = st.metodoPago === "Fiado" ? 0 : (montoPagado !== "" ? parseFloat(montoPagado) || 0 : 0);
   const saldo    = Math.max(0, total - monto);
 
-const registrar = async () => {
-  const nombreStr = String(clienteNombre || "").trim();
-  const telStr    = String(clienteTel    || "").trim();
-  const notaStr   = String(nota          || "").trim();
+  const registrar = async () => {
+    const nombreStr = String(clienteNombre || "").trim();
+    const telStr    = String(clienteTel    || "").trim();
+    const notaStr   = String(nota          || "").trim();
 
-  if (!nombreStr)           { showToast("⚠️ Ingresá el nombre del cliente"); return; }
-  if (!telStr)              { showToast("⚠️ Ingresá el teléfono"); return; }
-  if (!st.productos.length) { showToast("⚠️ Agregá al menos un producto"); return; }
-  const sinCosto = st.productos.some(p => !p.precioCosto || p.precioCosto === 0);
-if (sinCosto) { showToast("⚠️ Completá el precio de costo de todos los productos"); return; }
+    if (!nombreStr)           { showToast("⚠️ Ingresá el nombre del cliente"); return; }
+    if (!telStr)              { showToast("⚠️ Ingresá el teléfono"); return; }
+    if (!st.productos.length) { showToast("⚠️ Agregá al menos un producto"); return; }
+    const sinCosto = st.productos.some(p => !p.precioCosto || p.precioCosto === 0);
+    if (sinCosto) { showToast("⚠️ Completá el precio de costo de todos los productos"); return; }
 
-  const montoPag  = st.esPedido
-    ? (parseFloat(montoPagado) || 0)
-    : (st.metodoPago === "Fiado" ? 0 : (montoPagado !== "" ? parseFloat(montoPagado) || 0 : 0));
-  const saldoPend = Math.max(0, total - montoPag);
+    const montoPag  = st.esPedido
+      ? (parseFloat(montoPagado) || 0)
+      : (st.metodoPago === "Fiado" ? 0 : (montoPagado !== "" ? parseFloat(montoPagado) || 0 : 0));
+    const saldoPend = Math.max(0, total - montoPag);
 
-  setGuardando(true);
-  try {
-    await api.registrarVenta({
-      es_pedido:       st.esPedido,
-      cliente_nombre:  nombreStr,
-      cliente_tel:     telStr,
-      tipo_cliente:    st.tipoCliente,
-      productos: st.productos.map(p => ({
-        id_producto:      String(p.id           || ""),
-        nombre:           String(p.nombre       || ""),
-        variable:         String(p.variable     || ""),
-        cantidad:         Number(p.cant)        || 1,
-        precio_lista:     Number(p.precioLista) || 0,
-        pct_minorista:    Number(p.pctMin)      || 0,
-        precio_minorista: Number(p.precioMin)   || 0,
-        pct_mayorista:    Number(p.pctMay)      || 0,
-        precio_mayorista: Number(p.precioMay)   || 0,
-        precio_venta:     Number(p.precioVenta) || 0,
-        desc_ind:         0,
-        subtotal:         (Number(p.precioVenta) || 0) * (Number(p.cant) || 1),
-        pct_costo:        Number(p.pctCosto)    || 0,
-        precio_costo:     Number(p.precioCosto) || 0,
-        observacion:      String(p.observacion  || ""),
-      })),
-      desc_global_pct: st.descGlobal  || 0,
-      desc_global_amt: descAmt        || 0,
-      total_final:     total          || 0,
-      monto_pagado:    montoPag       || 0,
-      saldo_pendiente: saldoPend      || 0,
-      metodo_pago:     String(st.metodoPago || "Efectivo"),
-      nota:            notaStr,
-    });
-    setExito({ clienteNombre: nombreStr, total, montoPag, saldoPend, esPedido: st.esPedido, productos: st.productos, descAmt, descGlobal: st.descGlobal });
-  } catch (e) {
-    showToast("❌ Error: " + e.message);
-  } finally {
-    setGuardando(false);
-  }
-};
+    setGuardando(true);
+    try {
+      await api.registrarVenta({
+        es_pedido:       st.esPedido,
+        cliente_nombre:  nombreStr,
+        cliente_tel:     telStr,
+        tipo_cliente:    st.tipoCliente,
+        productos: st.productos.map(p => ({
+          id_producto:      String(p.id           || ""),
+          nombre:           String(p.nombre       || ""),
+          variable:         String(p.variable     || ""),
+          cantidad:         Number(p.cant)        || 1,
+          precio_lista:     Number(p.precioListaBase || p.precioLista) || 0,
+          pct_minorista:    Number(p.pctMin)      || 0,
+          precio_minorista: Number(p.precioMin)   || 0,
+          pct_mayorista:    Number(p.pctMay)      || 0,
+          precio_mayorista: Number(p.precioMay)   || 0,
+          precio_venta:     Number(p.precioVenta) || 0,
+          desc_ind:         0,
+          subtotal:         (Number(p.precioVenta) || 0) * (Number(p.cant) || 1),
+          pct_costo:        Number(p.pctCosto)    || 0,
+          precio_costo:     Number(p.precioCosto) || 0,
+          observacion:      String(p.observacion  || ""),
+        })),
+        desc_global_pct: st.descGlobal  || 0,
+        desc_global_amt: descAmt        || 0,
+        total_final:     total          || 0,
+        monto_pagado:    montoPag       || 0,
+        saldo_pendiente: saldoPend      || 0,
+        metodo_pago:     String(st.metodoPago || "Efectivo"),
+        nota:            notaStr,
+      });
+      setExito({ clienteNombre: nombreStr, total, montoPag, saldoPend, esPedido: st.esPedido, productos: st.productos, descAmt, descGlobal: st.descGlobal });
+    } catch (e) {
+      showToast("❌ Error: " + e.message);
+    } finally {
+      setGuardando(false);
+    }
+  };
 
   const nuevaVenta = () => {
     setSt(estadoInicial()); setClienteNombre(""); setClienteTel(""); setNota(""); setMontoPagado("");
@@ -302,7 +341,14 @@ if (sinCosto) { showToast("⚠️ Completá el precio de costo de todos los prod
                     <div style={{ fontSize: 14 }}>{p.nombre}</div>
                     {p.variable && <div style={{ fontSize: 11, color: "var(--muted-2)" }}>{p.variable}</div>}
                   </div>
-                  <span style={{ fontWeight: 700, color: "var(--rose)" }}>${fmt(p.precio_lista)}</span>
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ fontWeight: 700, color: "var(--rose)" }}>${fmt(p.precio_lista)}</span>
+                    {p.versiones && p.versiones.filter(v => v.etiqueta !== "v1").length > 0 && (
+                      <div style={{ fontSize: 9, color: "var(--muted-2)", marginTop: 2 }}>
+                        +{p.versiones.filter(v => v.etiqueta !== "v1").length} precio{p.versiones.filter(v => v.etiqueta !== "v1").length > 1 ? "s" : ""}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -313,7 +359,8 @@ if (sinCosto) { showToast("⚠️ Completá el precio de costo de todos los prod
           <ProductoRow key={p.uid} p={p} esMay={st.tipoCliente === "Mayorista"}
             onRemove={() => quitarProd(p.uid)} onCant={d => cambiarCant(p.uid, d)}
             onPctMin={pct => setPctMin(p.uid, pct)} onPctMay={pct => setPctMay(p.uid, pct)}
-            onPctCosto={pct => setPctCosto(p.uid, pct)} onUpdate={changes => updateProd(p.uid, changes)} />
+            onPctCosto={pct => setPctCosto(p.uid, pct)} onUpdate={changes => updateProd(p.uid, changes)}
+            onCambiarVersion={etiqueta => cambiarVersion(p.uid, etiqueta)} />
         ))}
 
         <button onClick={agregarPersonalizado} style={{ width: "100%", padding: 12, border: "1.5px dashed #1565C0", borderRadius: 10, background: "var(--blue-bg)", color: "var(--blue)", fontSize: 13, fontWeight: 700, cursor: "pointer", marginTop: 8 }}>
@@ -330,7 +377,7 @@ if (sinCosto) { showToast("⚠️ Completá el precio de costo de todos los prod
               padding: "7px 14px", borderRadius: 20, border: "1.5px solid", fontSize: 13, fontWeight: 600, cursor: "pointer",
               borderColor: st.descGlobal === pct ? "var(--rose)" : "var(--border)",
               background:  st.descGlobal === pct ? "var(--rose)" : "var(--surface-2)",
-              color:       st.descGlobal === pct ? "var(--surface-2)"   : "var(--muted-2)",
+              color:       st.descGlobal === pct ? "var(--surface-2)" : "var(--muted-2)",
             }}>{pct}%</button>
           ))}
         </div>
@@ -455,17 +502,19 @@ if (sinCosto) { showToast("⚠️ Completá el precio de costo de todos los prod
   );
 }
 
-function ProductoRow({ p, esMay, onRemove, onCant, onPctMin, onPctMay, onPctCosto, onUpdate }) {
+function ProductoRow({ p, esMay, onRemove, onCant, onPctMin, onPctMay, onPctCosto, onUpdate, onCambiarVersion }) {
   function fmt(n) { return Number(n || 0).toLocaleString("es-AR"); }
 
-  const rowStyle = { border: "1px solid #F0D6E4", borderRadius: 12, overflow: "hidden", marginBottom: 12 };
+  const rowStyle    = { border: "1px solid #F0D6E4", borderRadius: 12, overflow: "hidden", marginBottom: 12 };
   const headerStyle = { display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "12px 14px", background: "var(--surface-3)", borderBottom: "1px solid #F0D6E4" };
-  const bodyStyle = { padding: "14px" };
+  const bodyStyle   = { padding: "14px" };
   const pillBtn = (active, color) => ({
     padding: "4px 9px", borderRadius: 20, border: "1.5px solid", fontSize: 11, fontWeight: 600, cursor: "pointer",
     borderColor: active ? color : "var(--border)", background: active ? color : "var(--surface-2)", color: active ? "var(--surface-2)" : "var(--muted-2)",
   });
   const controls = { display: "grid", gridTemplateColumns: "auto 1fr 1fr", gap: 8, alignItems: "center", marginTop: 10 };
+
+  const tieneVersiones = (p.versionesDisponibles || []).length > 1;
 
   if (p.esPersonalizado) {
     return (
@@ -523,10 +572,37 @@ function ProductoRow({ p, esMay, onRemove, onCant, onPctMin, onPctMay, onPctCost
         </div>
         <button onClick={onRemove} style={{ width: 26, height: 26, borderRadius: "50%", border: "none", background: "var(--red-bg)", color: "var(--red)", cursor: "pointer" }}>✕</button>
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 14px", background: "#FFF0F7", borderBottom: "1px solid #F0D6E4" }}>
-        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase" }}>Precio de lista</span>
-        <span style={{ fontFamily: "'Playfair Display',serif", fontSize: 17, color: "var(--rose)", fontWeight: 700 }}>${fmt(p.precioLista)}</span>
-      </div>
+
+      {/* ✅ SELECTOR DE VERSIÓN DE PRECIO — solo aparece si hay más de una versión */}
+      {tieneVersiones ? (
+        <div style={{ padding: "10px 14px", background: "#FFF0F7", borderBottom: "1px solid #F0D6E4" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase", marginBottom: 6 }}>
+            Lista de precios
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {p.versionesDisponibles.map(v => (
+              <button
+                key={v.etiqueta}
+                onClick={() => onCambiarVersion(v.etiqueta)}
+                style={{
+                  padding: "6px 14px", borderRadius: 20, border: "1.5px solid", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                  borderColor: p.versionSeleccionada === v.etiqueta ? "var(--rose)" : "var(--border)",
+                  background:  p.versionSeleccionada === v.etiqueta ? "var(--rose)" : "var(--surface-2)",
+                  color:       p.versionSeleccionada === v.etiqueta ? "white" : "var(--muted-2)",
+                }}
+              >
+                {v.etiqueta} — ${fmt(v.precio)}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 14px", background: "#FFF0F7", borderBottom: "1px solid #F0D6E4" }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase" }}>Precio de lista</span>
+          <span style={{ fontFamily: "'Playfair Display',serif", fontSize: 17, color: "var(--rose)", fontWeight: 700 }}>${fmt(p.precioLista)}</span>
+        </div>
+      )}
+
       <div style={bodyStyle}>
         {/* MINORISTA */}
         <div style={{ marginBottom: 10 }}>
@@ -538,6 +614,7 @@ function ProductoRow({ p, esMay, onRemove, onCant, onPctMin, onPctMay, onPctCost
           </div>
           <div style={{ fontSize: 11, color: "var(--muted-2)", textAlign: "right" }}>Precio minorista: <strong style={{ color: "var(--rose)" }}>${fmt(p.precioMin)}</strong></div>
         </div>
+
         {/* MAYORISTA */}
         {esMay && (
           <div style={{ marginBottom: 10, borderTop: "1px solid #F0D6E4", paddingTop: 10 }}>
@@ -550,6 +627,7 @@ function ProductoRow({ p, esMay, onRemove, onCant, onPctMin, onPctMay, onPctCost
             <div style={{ fontSize: 11, color: "var(--muted-2)", textAlign: "right" }}>Precio mayorista: <strong style={{ color: "#4527A0" }}>${fmt(p.precioMay)}</strong></div>
           </div>
         )}
+
         {/* COSTO */}
         <div style={{ marginBottom: 10, borderTop: "1px solid #F0D6E4", paddingTop: 10 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted-2)", textTransform: "uppercase", marginBottom: 5 }}>
@@ -558,13 +636,16 @@ function ProductoRow({ p, esMay, onRemove, onCant, onPctMin, onPctMay, onPctCost
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 4 }}>
             {PCTS_COST.map(pct => <button key={pct} onClick={() => onPctCosto(pct)} style={pillBtn(p.pctCosto===pct,"#388E3C")}>{pct}%</button>)}
           </div>
-<div style={{ fontSize: 11, color: p.precioCosto > 0 ? "#2E7D32" : "var(--red)", textAlign: "right", fontWeight: p.precioCosto === 0 ? 700 : 400 }}>
-  {p.precioCosto === 0 ? "⚠️ Costo obligatorio" : <>Precio costo: <strong>${fmt(p.precioCosto)}</strong></>}
-</div>        </div>
+          <div style={{ fontSize: 11, color: p.precioCosto > 0 ? "#2E7D32" : "var(--red)", textAlign: "right", fontWeight: p.precioCosto === 0 ? 700 : 400 }}>
+            {p.precioCosto === 0 ? "⚠️ Costo obligatorio" : <>Precio costo: <strong>${fmt(p.precioCosto)}</strong></>}
+          </div>
+        </div>
+
         {/* OBSERVACIÓN */}
         <input type="text" value={p.observacion} onChange={e => onUpdate({ observacion: e.target.value })}
           placeholder="📝 Observación (opcional)"
           style={{ width: "100%", padding: "10px 12px", border: "1px solid #F0D6E4", borderRadius: 8, fontSize: 13, fontFamily: "'DM Sans',sans-serif", outline: "none", marginBottom: 10 }} />
+
         {/* CONTROLES */}
         <div style={controls}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--surface-3)", borderRadius: 8, padding: "4px 8px", border: "1px solid #F0D6E4" }}>
