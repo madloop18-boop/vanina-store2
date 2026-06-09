@@ -7,7 +7,7 @@ function fmt(n) {
 }
 
 // ─── TICKET WHATSAPP ─────────────────────────────────────────────
-function TicketModal({ deudor, onClose }) {
+function TicketModal({ deudor, onClose, pagos }) {
   if (!deudor) return null;
 
   const fecha = new Date().toLocaleDateString("es-AR", {
@@ -15,19 +15,49 @@ function TicketModal({ deudor, onClose }) {
   });
   const hora = new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
 
+  // Construir mapa de montos pagados por producto para este deudor
+  // pagos es el historial completo — filtramos por cliente y producto_ref
+  const pagadosPorProd = {};
+  if (pagos?.length > 0) {
+    pagos
+      .filter(p => (p.cliente || "").toLowerCase().trim() === (deudor.nombre || "").toLowerCase().trim())
+      .filter(p => p.producto_ref)
+      .forEach(p => {
+        // producto_ref tiene formato "ID_PROD | variable | observacion"
+        const idProd = String(p.producto_ref).split("|")[0].trim();
+        if (!pagadosPorProd[idProd]) pagadosPorProd[idProd] = 0;
+        pagadosPorProd[idProd] += Number(p.monto) || 0;
+      });
+  }
+
+  // Para cada producto del deudor, determinar si está total o parcialmente pagado
+  const productosConEstado = (deudor.productos || []).map(p => {
+    const idProd = String(p.id_producto || "");
+    const pagado = pagadosPorProd[idProd] || 0;
+    const subtotal = Number(p.subtotal) || 0;
+    const estaPagado = idProd && pagado > 0 && pagado >= subtotal;
+    const estaParcial = idProd && pagado > 0 && pagado < subtotal;
+    return { ...p, _pagado: estaPagado, _pagadoParcial: estaParcial, _montoPagado: pagado };
+  });
+
+  // Solo mostrar en el ticket los que NO están completamente pagados
+  const productosPendientes = productosConEstado.filter(p => !p._pagado);
+
   const textoWsp = () => {
     let t = `🌸 *Vanina Store*\n`;
     t += `📅 ${fecha} · ${hora}\n`;
     t += `━━━━━━━━━━━━━━━━━━\n`;
     t += `👤 *${deudor.nombre}*\n\n`;
-    if (deudor.productos?.length > 0) {
+    if (productosPendientes.length > 0) {
       t += `📦 *Detalle pendiente:*\n`;
-      deudor.productos.forEach(p => {
+      productosPendientes.forEach(p => {
         const nombreMostrar = (p.nombre || "").toLowerCase().includes("personalizado") && p.observacion
-        ? `${p.nombre} — ${p.observacion}`
-        : p.nombre;
-      t += `• ${nombreMostrar}${p.variable ? ` (${p.variable})` : ""} x${p.cantidad} — $${fmt(p.subtotal)}\n`;
-        if (p.observacion) t += `  📝 ${p.observacion}\n`;
+          ? `${p.nombre} — ${p.observacion}`
+          : p.nombre;
+        t += `• ${nombreMostrar}${p.variable ? ` (${p.variable})` : ""} x${p.cantidad} — $${fmt(p.subtotal)}`;
+        if (p._pagadoParcial) t += ` _(pagado parcial: $${fmt(p._montoPagado)})_`;
+        t += `\n`;
+        if (p.observacion && !nombreMostrar.includes(p.observacion)) t += `  📝 ${p.observacion}\n`;
       });
       t += `\n`;
     }
@@ -37,9 +67,7 @@ function TicketModal({ deudor, onClose }) {
     return t;
   };
 
-  const copiar = () => {
-    navigator.clipboard.writeText(textoWsp());
-  };
+  const copiar = () => { navigator.clipboard.writeText(textoWsp()); };
 
   const abrirWsp = () => {
     const tel = String(deudor.tel || "").replace(/\D/g, "");
@@ -52,12 +80,12 @@ function TicketModal({ deudor, onClose }) {
       position: "fixed", inset: 0, zIndex: 999,
       background: "rgba(26,10,18,0.55)", backdropFilter: "blur(4px)",
       display: "flex", alignItems: "center", justifyContent: "center",
-      padding: 20,
+      padding: 20, overflowY: "auto",
     }}>
       <div style={{
         background: "var(--surface-2)", borderRadius: 20, width: "100%", maxWidth: 420,
         boxShadow: "0 24px 80px rgba(233,30,140,0.25)",
-        overflow: "hidden", animation: "slideUp 0.25s ease",
+        overflowY: "auto", maxHeight: "90vh", animation: "slideUp 0.25s ease",
       }}>
         <div style={{
           background: "linear-gradient(135deg,#E91E8C,#B5006E)",
@@ -88,25 +116,40 @@ function TicketModal({ deudor, onClose }) {
             </div>
           </div>
 
-          {deudor.productos?.length > 0 && (
-            <div style={{ marginBottom: 20 }}>
+          {/* Lista de productos con estado de pago */}
+          {productosConEstado.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted-2)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                 Detalle
               </div>
               <div style={{ background: "var(--surface-3)", borderRadius: 12, padding: "10px 14px" }}>
-                {deudor.productos.map((p, i) => (
+                {productosConEstado.map((p, i) => (
                   <div key={i} style={{
-                    fontSize: 13, lineHeight: 1.7, color: "var(--text)",
-                    borderBottom: i < deudor.productos.length - 1 ? "1px solid #F0D6E4" : "none",
-                    paddingBottom: i < deudor.productos.length - 1 ? 8 : 0,
-                    marginBottom: i < deudor.productos.length - 1 ? 8 : 0,
+                    fontSize: 13, lineHeight: 1.7,
+                    color: p._pagado ? "var(--muted-2)" : "var(--text)",
+                    borderBottom: i < productosConEstado.length - 1 ? "1px solid #F0D6E4" : "none",
+                    paddingBottom: i < productosConEstado.length - 1 ? 8 : 0,
+                    marginBottom: i < productosConEstado.length - 1 ? 8 : 0,
+                    textDecoration: p._pagado ? "line-through" : "none",
+                    opacity: p._pagado ? 0.5 : 1,
                   }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>• {p.nombre}{p.variable ? ` (${p.variable})` : ""} x{p.cantidad}</span>
-                      <span style={{ fontWeight: 700 }}>${fmt(p.subtotal)}</span>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <span>
+                        {p._pagado ? "❌ " : p._pagadoParcial ? "⚡ " : "• "}
+                        {p.nombre}{p.variable ? ` (${p.variable})` : ""} x{p.cantidad}
+                      </span>
+                      <span style={{ fontWeight: 700, flexShrink: 0, marginLeft: 8 }}>
+                        ${fmt(p.subtotal)}
+                      </span>
                     </div>
-                    {p.observacion && (
-                      <div style={{ fontSize: 11, color: "var(--muted-2)", marginLeft: 10 }}>📝 {p.observacion}</div>
+                    {p._pagado && (
+                      <div style={{ fontSize: 11, color: "var(--green)", marginLeft: 18 }}>✅ pagado ${fmt(p._montoPagado)}</div>
+                    )}
+                    {p._pagadoParcial && (
+                      <div style={{ fontSize: 11, color: "#E65100", marginLeft: 18 }}>⚡ pagado parcial ${fmt(p._montoPagado)}</div>
+                    )}
+                    {p.observacion && !p._pagado && (
+                      <div style={{ fontSize: 11, color: "var(--muted-2)", marginLeft: 18 }}>📝 {p.observacion}</div>
                     )}
                   </div>
                 ))}
@@ -117,8 +160,7 @@ function TicketModal({ deudor, onClose }) {
           <div style={{
             background: "#F0FBF7", border: "1px solid #A7E9D5", borderRadius: 12,
             padding: "12px 14px", fontSize: 12, color: "#1A5C45", fontFamily: "monospace",
-            whiteSpace: "pre-wrap", marginBottom: 16, maxHeight: 160, overflowY: "auto",
-            lineHeight: 1.6,
+            whiteSpace: "pre-wrap", marginBottom: 16, lineHeight: 1.6,
           }}>
             {textoWsp()}
           </div>
@@ -153,7 +195,6 @@ function TicketModal({ deudor, onClose }) {
   );
 }
 
-// ─── MODAL PAGO CONFIRMADO ────────────────────────────────────────
 function PagoConfirmadoModal({ ticket, onClose }) {
   if (!ticket) return null;
   const fecha = new Date().toLocaleDateString("es-AR", {
@@ -171,7 +212,7 @@ function PagoConfirmadoModal({ ticket, onClose }) {
       <div style={{
         background: "var(--surface-2)", borderRadius: 20, width: "100%", maxWidth: 400,
         boxShadow: "0 24px 80px rgba(233,30,140,0.25)",
-        overflow: "hidden", animation: "slideUp 0.25s ease",
+        overflowY: "auto", maxHeight: "90vh", animation: "slideUp 0.25s ease",
       }}>
         <div style={{
           background: "linear-gradient(135deg,#E91E8C,#B5006E)",
@@ -274,6 +315,7 @@ export default function Pagos({ showToast }) {
   const [pagando, setPagando]           = useState({});
   const [ticket, setTicket]             = useState(null);
   const [ticketDeudor, setTicketDeudor] = useState(null);
+  const [historialPagos, setHistorialPagos] = useState([]);
 
   // Por deudor: monto general, método, modo ('general'|'producto'), montos por producto
   const [montos, setMontos]       = useState({});
@@ -284,8 +326,9 @@ export default function Pagos({ showToast }) {
   const cargar = async () => {
     setLoading(true);
     try {
-      const res = await api.getDeudores();
-      setDeudores(res.deudores || []);
+      const [resD, resP] = await Promise.all([api.getDeudores(), api.getHistorialPagos()]);
+      setDeudores(resD.deudores || []);
+      setHistorialPagos(resP.pagos || []);
     } catch (e) {
       showToast("❌ Error al cargar: " + e.message);
     } finally {
@@ -381,9 +424,9 @@ export default function Pagos({ showToast }) {
   };
 
   return (
-    <div style={{ padding: "28px 32px", maxWidth: 1400, margin: "0 auto" }} className="tab-padding">
+    <div style={{ padding: "28px 32px", maxWidth: 700, margin: "0 auto" }} className="tab-padding">
       <PagoConfirmadoModal ticket={ticket} onClose={() => setTicket(null)} />
-      <TicketModal deudor={ticketDeudor} onClose={() => setTicketDeudor(null)} />
+      <TicketModal deudor={ticketDeudor} onClose={() => setTicketDeudor(null)} pagos={historialPagos} />
 
       <button onClick={recalcular} style={{
         width: "100%", padding: "12px 20px", background: "var(--surface-2)",
