@@ -381,7 +381,7 @@ export default function Pagos({ showToast }) {
   };
 
   return (
-    <div style={{ padding: "28px 32px", maxWidth: 700, margin: "0 auto" }} className="tab-padding">
+    <div style={{ padding: "28px 32px", maxWidth: 1400, margin: "0 auto" }} className="tab-padding">
       <PagoConfirmadoModal ticket={ticket} onClose={() => setTicket(null)} />
       <TicketModal deudor={ticketDeudor} onClose={() => setTicketDeudor(null)} />
 

@@ -198,7 +198,7 @@ export default function Stock({ showToast }) {
   };
 
   return (
-    <div style={{ padding:"20px", maxWidth:800, margin:"0 auto" }} className="page-pad">
+    <div style={{ padding:"20px", maxWidth:1400, margin:"0 auto" }} className="page-pad">
       <style>{skeletonCSS}</style>
       <ModalCargaStock prod={modalProd} onConfirm={confirmarCarga} onClose={() => setModalProd(null)} />
 

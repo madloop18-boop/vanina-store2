@@ -578,7 +578,7 @@ export default function VentasDirectas({ showToast }) {
   };
 
   return (
-    <div style={{ padding: "28px 32px", maxWidth: 800, margin: "0 auto" }} className="tab-padding">
+    <div style={{ padding: "28px 32px", maxWidth: 1400, margin: "0 auto" }} className="tab-padding">
       <style>{skeletonCSS}</style>
 
       {ventaBorrar && (

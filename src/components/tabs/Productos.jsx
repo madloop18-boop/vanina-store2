@@ -72,7 +72,7 @@ export default function Productos({ showToast }) {
   };
 
   return (
-    <div style={{ padding:"20px", maxWidth:860, margin:"0 auto" }} className="page-pad">
+    <div style={{ padding:"20px", maxWidth:1400, margin:"0 auto" }} className="page-pad">
       <style>{skeletonCSS}</style>
 
       {/* Modal drawer */}

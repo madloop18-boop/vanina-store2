@@ -207,7 +207,7 @@ export default function HistorialPagos({ showToast }) {
   };
 
   return (
-    <div style={{ padding: "28px 32px", maxWidth: 700, margin: "0 auto" }} className="tab-padding">
+    <div style={{ padding: "28px 32px", maxWidth: 1400, margin: "0 auto" }} className="tab-padding">
 
       {/* MODALES */}
       <ModalEditarPago

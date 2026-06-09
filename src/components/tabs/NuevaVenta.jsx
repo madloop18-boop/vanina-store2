@@ -221,7 +221,7 @@ export default function NuevaVenta({ showToast }) {
   // PANTALLA ÉXITO
   if (exito) {
     return (
-      <div style={{ padding: "40px 32px", maxWidth: 600, margin: "0 auto", textAlign: "center" }} className="tab-padding">
+      <div style={{ padding: "40px 32px", maxWidth: 1400, margin: "0 auto", textAlign: "center" }} className="tab-padding">
         <div style={{ fontSize: 56, marginBottom: 16 }}>{exito.esPedido ? "📦" : "🎉"}</div>
         <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: 24, color: "var(--rose)", marginBottom: 8 }}>
           {exito.esPedido ? "¡Pedido registrado!" : "¡Venta registrada!"}
@@ -258,7 +258,7 @@ export default function NuevaVenta({ showToast }) {
   }
 
   return (
-    <div style={{ padding: "28px 32px 120px", maxWidth: 680, margin: "0 auto" }} className="tab-padding">
+    <div style={{ padding: "28px 32px 120px", maxWidth: 1400, margin: "0 auto" }} className="tab-padding">
 
       {/* TIPO OPERACIÓN */}
       <div style={card}>
