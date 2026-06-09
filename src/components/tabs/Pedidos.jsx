@@ -173,13 +173,17 @@ function ModalTicket({ grupo, onClose, showToast }) {
     window.open(`https://wa.me/${tel}?text=${msg}`, "_blank");
   };
 
-  const enviarTelegram = async () => {
+ const enviarTelegram = async () => {
     try {
       await api.enviarTicket({
+        id_pedido:     grupo.ids[0],                    // ← NUEVO
         cliente:       grupo.cliente,
         tel:           grupo.tel,
         tipo_cliente:  grupo.tipo,
-        items:         itemsMostrar,
+        items:         itemsMostrar.map(it => ({        // ← NUEVO: mapear con id_producto
+          ...it,
+          id_producto: it.id_producto || "",
+        })),
         total:         totalEntregado,
         saldo:         grupo.saldo,
       });
