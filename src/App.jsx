@@ -147,9 +147,8 @@ function LoadingScreen({ visible }) {
 
 
 export default function App() {
-  if (window.location.pathname === "/operaciones") {
-    return <VistaOperaciones />;
-  }
+  const esVistaOperaciones = window.location.pathname === "/operaciones";
+
   const [activeTab, setActiveTab] = useState("dashboard");
   const [loading, setLoading]     = useState(true);
   const { toast, showToast }      = useToast();
@@ -202,6 +201,12 @@ export default function App() {
 
     return () => { clearTimeout(t); cancelAnimationFrame(raf); };
   }, []);
+
+  // Vista de operaciones: ahora retornamos después de declarar todos los hooks,
+  // respetando las rules-of-hooks (orden de hooks estable entre renders).
+  if (esVistaOperaciones) {
+    return <VistaOperaciones />;
+  }
 
   const screens = {
     dashboard: <Dashboard      showToast={showToast} onNav={setActiveTab} />,
