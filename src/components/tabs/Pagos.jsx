@@ -116,39 +116,34 @@ function TicketModal({ deudor, onClose, pagos }) {
             </div>
           </div>
 
-          {/* Lista de productos con estado de pago */}
-          {productosConEstado.length > 0 && (
+          {/* Lista de productos pendientes (los ya pagados no se muestran) */}
+          {productosPendientes.length > 0 && (
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted-2)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                 Detalle
               </div>
               <div style={{ background: "var(--surface-3)", borderRadius: 12, padding: "10px 14px" }}>
-                {productosConEstado.map((p, i) => (
+                {productosPendientes.map((p, i) => (
                   <div key={i} style={{
                     fontSize: 13, lineHeight: 1.7,
-                    color: p._pagado ? "var(--muted-2)" : "var(--text)",
-                    borderBottom: i < productosConEstado.length - 1 ? "1px solid #F0D6E4" : "none",
-                    paddingBottom: i < productosConEstado.length - 1 ? 8 : 0,
-                    marginBottom: i < productosConEstado.length - 1 ? 8 : 0,
-                    textDecoration: p._pagado ? "line-through" : "none",
-                    opacity: p._pagado ? 0.5 : 1,
+                    color: "var(--text)",
+                    borderBottom: i < productosPendientes.length - 1 ? "1px solid #F0D6E4" : "none",
+                    paddingBottom: i < productosPendientes.length - 1 ? 8 : 0,
+                    marginBottom: i < productosPendientes.length - 1 ? 8 : 0,
                   }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <span>
-                        {p._pagado ? "❌ " : p._pagadoParcial ? "⚡ " : "• "}
+                        {p._pagadoParcial ? "⚡ " : "• "}
                         {p.nombre}{p.variable ? ` (${p.variable})` : ""} x{p.cantidad}
                       </span>
                       <span style={{ fontWeight: 700, flexShrink: 0, marginLeft: 8 }}>
                         ${fmt(p.subtotal)}
                       </span>
                     </div>
-                    {p._pagado && (
-                      <div style={{ fontSize: 11, color: "var(--green)", marginLeft: 18 }}>✅ pagado ${fmt(p._montoPagado)}</div>
-                    )}
                     {p._pagadoParcial && (
                       <div style={{ fontSize: 11, color: "#E65100", marginLeft: 18 }}>⚡ pagado parcial ${fmt(p._montoPagado)}</div>
                     )}
-                    {p.observacion && !p._pagado && (
+                    {p.observacion && (
                       <div style={{ fontSize: 11, color: "var(--muted-2)", marginLeft: 18 }}>📝 {p.observacion}</div>
                     )}
                   </div>
@@ -634,14 +629,25 @@ export default function Pagos({ showToast }) {
             {modo === "producto" && d.productos?.length > 0 && (
               <div>
                 <div style={{ background: "var(--surface-3)", borderRadius: 10, padding: "10px 14px", marginBottom: 10 }}>
-                  {d.productos.map((p, i) => {
+                  {d.productos.filter(p => {
+                    // Ocultar productos ya pagados completamente
+                    const idProd = String(p.id_producto || "");
+                    if (!idProd) return true;
+                    const pagadoEste = (historialPagos || [])
+                      .filter(h => (h.cliente || "").toLowerCase().trim() === (d.nombre || "").toLowerCase().trim() && h.producto_ref)
+                      .reduce((acc, h) => {
+                        const ref = String(h.producto_ref || "").split("|")[0].trim();
+                        return ref === idProd ? acc + (Number(h.monto) || 0) : acc;
+                      }, 0);
+                    return pagadoEste < (Number(p.subtotal) || 0);
+                  }).map((p, i, arr) => {
                     const key = prodKey(p);
                     return (
                       <div key={i} style={{
                         display: "flex", alignItems: "center", gap: 8,
-                        paddingBottom: i < d.productos.length - 1 ? 10 : 0,
-                        marginBottom: i < d.productos.length - 1 ? 10 : 0,
-                        borderBottom: i < d.productos.length - 1 ? "1px solid #F0D6E4" : "none",
+                        paddingBottom: i < arr.length - 1 ? 10 : 0,
+                        marginBottom: i < arr.length - 1 ? 10 : 0,
+                        borderBottom: i < arr.length - 1 ? "1px solid #F0D6E4" : "none",
                       }}>
                         <div style={{ flex: 1, fontSize: 13, color: "var(--text)", lineHeight: 1.4 }}>
                           <div>{p.nombre}{p.variable ? ` (${p.variable})` : ""} x{p.cantidad}</div>
