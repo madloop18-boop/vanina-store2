@@ -7,16 +7,19 @@ function fmt(n) {
 }
 
 // ─── HELPERS: matching preciso de pagos por producto ─────────────
+// Reconstruye el producto_ref tal como lo arma el backend
+function _expectedProdRef(p) {
+  let ref = String(p.id_producto || "").trim();
+  if (!ref) return "";
+  const v = String(p.variable || "").trim();
+  const o = String(p.observacion || "").trim();
+  if (v) ref += " | " + v;
+  if (o) ref += " | " + o;
+  return ref.toLowerCase();
+}
 // Clave única para un producto del deudor
 function _prodKey(p) {
-  return [p.id_pedido || "", p.id_producto || "", (p.variable || "").trim(), (p.observacion || "").trim()]
-    .map(s => String(s).toLowerCase()).join("|");
-}
-// Clave única reconstruida desde un pago del historial
-function _pagoKey(h) {
-  const parts = String(h.producto_ref || "").split("|").map(s => s.trim());
-  return [h.pedido_ref || "", parts[0] || "", parts[1] || "", parts[2] || ""]
-    .map(s => String(s).toLowerCase()).join("|");
+  return String(p.id_pedido || "").toLowerCase() + "||" + _expectedProdRef(p);
 }
 // Mapa de pagado por clave única para un cliente dado
 function _buildPagadoMap(pagos, nombreCliente) {
@@ -26,7 +29,7 @@ function _buildPagadoMap(pagos, nombreCliente) {
   pagos
     .filter(h => (h.cliente || "").toLowerCase().trim() === clienteKey && h.producto_ref)
     .forEach(h => {
-      const key = _pagoKey(h);
+      const key = String(h.pedido_ref || "").toLowerCase() + "||" + String(h.producto_ref || "").toLowerCase().trim();
       if (!map[key]) map[key] = 0;
       map[key] += Number(h.monto) || 0;
     });
@@ -565,46 +568,46 @@ export default function Pagos({ showToast }) {
             {/* Lista de productos */}
             {d.productos?.length > 0 && (() => {
               const pagadoMap = _buildPagadoMap(historialPagos, d.nombre);
-              const pendientes = d.productos.filter(p => {
-                const pagado = pagadoMap[_prodKey(p)] || 0;
-                return pagado < (Number(p.subtotal) || 0);
-              });
-              const pagadosCount = d.productos.length - pendientes.length;
-              if (pendientes.length === 0 && pagadosCount > 0) return (
-                <div style={{ fontSize: 12, color: "var(--green)", fontWeight: 600, marginBottom: 12, background: "var(--surface-3)", borderRadius: 10, padding: "10px 14px" }}>
-                  ✅ Todos los productos pagados ({pagadosCount})
-                </div>
-              );
               return (
                 <div style={{ fontSize: 13, marginBottom: 12, lineHeight: 1.8, color: "var(--text-2)", background: "var(--surface-3)", borderRadius: 10, padding: "10px 14px" }}>
-                  {pendientes.map((p, i) => {
+                  {d.productos.map((p, i) => {
                     const pagado = pagadoMap[_prodKey(p)] || 0;
-                    const esParcial = pagado > 0;
+                    const subtotal = Number(p.subtotal) || 0;
+                    const estaPagado = pagado > 0 && pagado >= subtotal;
+                    const esParcial = pagado > 0 && pagado < subtotal;
                     return (
-                      <div key={i}>
+                      <div key={i} style={{ opacity: estaPagado ? 0.45 : 1 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                          <span>{esParcial ? "⚡ " : "• "}{p.nombre}{p.variable ? ` (${p.variable})` : ""} x{p.cantidad}</span>
-                          <span style={{ fontWeight: 700, marginLeft: 8, whiteSpace: "nowrap" }}>${fmt(p.subtotal)}</span>
+                          <span style={{ textDecoration: estaPagado ? "line-through" : "none" }}>
+                            {estaPagado ? "✅ " : esParcial ? "⚡ " : "• "}
+                            {p.nombre}{p.variable ? ` (${p.variable})` : ""} x{p.cantidad}
+                          </span>
+                          <span style={{
+                            fontWeight: 700, marginLeft: 8, whiteSpace: "nowrap",
+                            textDecoration: estaPagado ? "line-through" : "none",
+                          }}>
+                            ${fmt(p.subtotal)}
+                            {estaPagado && (
+                              <span style={{
+                                marginLeft: 6, fontSize: 10, fontWeight: 700,
+                                background: "#D4EDDA", color: "#155724",
+                                padding: "2px 6px", borderRadius: 6,
+                                textDecoration: "none", display: "inline-block",
+                              }}>PAGADO</span>
+                            )}
+                          </span>
                         </div>
                         {esParcial && (
-                          <div style={{ fontSize: 11, color: "#E65100", marginLeft: 12 }}>⚡ pagado parcial ${fmt(pagado)}</div>
-                        )}
-                        {p.id_producto && (
-                          <div style={{ fontSize: 10, color: "var(--muted-2)", marginLeft: 12, fontFamily: "monospace" }}>
-                            ID: {p.id_producto}
+                          <div style={{ fontSize: 11, color: "#E65100", marginLeft: 12 }}>
+                            ⚡ pagado parcial ${fmt(pagado)} / ${fmt(subtotal)}
                           </div>
                         )}
-                        {p.observacion && (
+                        {p.observacion && !estaPagado && (
                           <div style={{ fontSize: 11, color: "var(--muted-2)", marginLeft: 12 }}>📝 {p.observacion}</div>
                         )}
                       </div>
                     );
                   })}
-                  {pagadosCount > 0 && (
-                    <div style={{ fontSize: 11, color: "var(--green)", marginTop: 6, fontWeight: 600 }}>
-                      ✅ {pagadosCount} producto{pagadosCount > 1 ? "s" : ""} ya pagado{pagadosCount > 1 ? "s" : ""}
-                    </div>
-                  )}
                 </div>
               );
             })()}
