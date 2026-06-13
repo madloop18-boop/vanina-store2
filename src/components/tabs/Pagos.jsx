@@ -6,6 +6,33 @@ function fmt(n) {
   return Number(n || 0).toLocaleString("es-AR");
 }
 
+// ─── HELPERS: matching preciso de pagos por producto ─────────────
+// Clave única para un producto del deudor
+function _prodKey(p) {
+  return [p.id_pedido || "", p.id_producto || "", (p.variable || "").trim(), (p.observacion || "").trim()]
+    .map(s => String(s).toLowerCase()).join("|");
+}
+// Clave única reconstruida desde un pago del historial
+function _pagoKey(h) {
+  const parts = String(h.producto_ref || "").split("|").map(s => s.trim());
+  return [h.pedido_ref || "", parts[0] || "", parts[1] || "", parts[2] || ""]
+    .map(s => String(s).toLowerCase()).join("|");
+}
+// Mapa de pagado por clave única para un cliente dado
+function _buildPagadoMap(pagos, nombreCliente) {
+  const map = {};
+  if (!pagos?.length) return map;
+  const clienteKey = (nombreCliente || "").toLowerCase().trim();
+  pagos
+    .filter(h => (h.cliente || "").toLowerCase().trim() === clienteKey && h.producto_ref)
+    .forEach(h => {
+      const key = _pagoKey(h);
+      if (!map[key]) map[key] = 0;
+      map[key] += Number(h.monto) || 0;
+    });
+  return map;
+}
+
 // ─── TICKET WHATSAPP ─────────────────────────────────────────────
 function TicketModal({ deudor, onClose, pagos }) {
   if (!deudor) return null;
@@ -15,28 +42,16 @@ function TicketModal({ deudor, onClose, pagos }) {
   });
   const hora = new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
 
-  // Construir mapa de montos pagados por producto para este deudor
-  // pagos es el historial completo — filtramos por cliente y producto_ref
-  const pagadosPorProd = {};
-  if (pagos?.length > 0) {
-    pagos
-      .filter(p => (p.cliente || "").toLowerCase().trim() === (deudor.nombre || "").toLowerCase().trim())
-      .filter(p => p.producto_ref)
-      .forEach(p => {
-        // producto_ref tiene formato "ID_PROD | variable | observacion"
-        const idProd = String(p.producto_ref).split("|")[0].trim();
-        if (!pagadosPorProd[idProd]) pagadosPorProd[idProd] = 0;
-        pagadosPorProd[idProd] += Number(p.monto) || 0;
-      });
-  }
+  // Mapa preciso: usa id_pedido + id_producto + variable + observacion
+  const pagadoMap = _buildPagadoMap(pagos, deudor.nombre);
 
   // Para cada producto del deudor, determinar si está total o parcialmente pagado
   const productosConEstado = (deudor.productos || []).map(p => {
-    const idProd = String(p.id_producto || "");
-    const pagado = pagadosPorProd[idProd] || 0;
+    const key = _prodKey(p);
+    const pagado = pagadoMap[key] || 0;
     const subtotal = Number(p.subtotal) || 0;
-    const estaPagado = idProd && pagado > 0 && pagado >= subtotal;
-    const estaParcial = idProd && pagado > 0 && pagado < subtotal;
+    const estaPagado = pagado > 0 && pagado >= subtotal;
+    const estaParcial = pagado > 0 && pagado < subtotal;
     return { ...p, _pagado: estaPagado, _pagadoParcial: estaParcial, _montoPagado: pagado };
   });
 
@@ -436,9 +451,12 @@ export default function Pagos({ showToast }) {
       {/* ── CARD RESUMEN GLOBAL ── */}
       {!loading && deudores.length > 0 && (() => {
         const totalDeuda = deudores.reduce((acc, d) => acc + d.saldo, 0);
-        const todosProductos = deudores.flatMap(d =>
-          (d.productos || []).map(p => ({ ...p, cliente: d.nombre }))
-        );
+        const todosProductos = deudores.flatMap(d => {
+          const pm = _buildPagadoMap(historialPagos, d.nombre);
+          return (d.productos || [])
+            .filter(p => (pm[_prodKey(p)] || 0) < (Number(p.subtotal) || 0))
+            .map(p => ({ ...p, cliente: d.nombre }));
+        });
         // Agrupar por nombre+variable para el resumen
         const resumenMap = {};
         todosProductos.forEach(p => {
@@ -545,26 +563,51 @@ export default function Pagos({ showToast }) {
             </div>
 
             {/* Lista de productos */}
-            {d.productos?.length > 0 && (
-              <div style={{ fontSize: 13, marginBottom: 12, lineHeight: 1.8, color: "var(--text-2)", background: "var(--surface-3)", borderRadius: 10, padding: "10px 14px" }}>
-                {d.productos.map((p, i) => (
-                  <div key={i}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <span>• {p.nombre}{p.variable ? ` (${p.variable})` : ""} x{p.cantidad}</span>
-                      <span style={{ fontWeight: 700, marginLeft: 8, whiteSpace: "nowrap" }}>${fmt(p.subtotal)}</span>
-                    </div>
-                    {p.id_producto && (
-                      <div style={{ fontSize: 10, color: "var(--muted-2)", marginLeft: 12, fontFamily: "monospace" }}>
-                        ID: {p.id_producto}
+            {d.productos?.length > 0 && (() => {
+              const pagadoMap = _buildPagadoMap(historialPagos, d.nombre);
+              const pendientes = d.productos.filter(p => {
+                const pagado = pagadoMap[_prodKey(p)] || 0;
+                return pagado < (Number(p.subtotal) || 0);
+              });
+              const pagadosCount = d.productos.length - pendientes.length;
+              if (pendientes.length === 0 && pagadosCount > 0) return (
+                <div style={{ fontSize: 12, color: "var(--green)", fontWeight: 600, marginBottom: 12, background: "var(--surface-3)", borderRadius: 10, padding: "10px 14px" }}>
+                  ✅ Todos los productos pagados ({pagadosCount})
+                </div>
+              );
+              return (
+                <div style={{ fontSize: 13, marginBottom: 12, lineHeight: 1.8, color: "var(--text-2)", background: "var(--surface-3)", borderRadius: 10, padding: "10px 14px" }}>
+                  {pendientes.map((p, i) => {
+                    const pagado = pagadoMap[_prodKey(p)] || 0;
+                    const esParcial = pagado > 0;
+                    return (
+                      <div key={i}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                          <span>{esParcial ? "⚡ " : "• "}{p.nombre}{p.variable ? ` (${p.variable})` : ""} x{p.cantidad}</span>
+                          <span style={{ fontWeight: 700, marginLeft: 8, whiteSpace: "nowrap" }}>${fmt(p.subtotal)}</span>
+                        </div>
+                        {esParcial && (
+                          <div style={{ fontSize: 11, color: "#E65100", marginLeft: 12 }}>⚡ pagado parcial ${fmt(pagado)}</div>
+                        )}
+                        {p.id_producto && (
+                          <div style={{ fontSize: 10, color: "var(--muted-2)", marginLeft: 12, fontFamily: "monospace" }}>
+                            ID: {p.id_producto}
+                          </div>
+                        )}
+                        {p.observacion && (
+                          <div style={{ fontSize: 11, color: "var(--muted-2)", marginLeft: 12 }}>📝 {p.observacion}</div>
+                        )}
                       </div>
-                    )}
-                    {p.observacion && (
-                      <div style={{ fontSize: 11, color: "var(--muted-2)", marginLeft: 12 }}>📝 {p.observacion}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+                    );
+                  })}
+                  {pagadosCount > 0 && (
+                    <div style={{ fontSize: 11, color: "var(--green)", marginTop: 6, fontWeight: 600 }}>
+                      ✅ {pagadosCount} producto{pagadosCount > 1 ? "s" : ""} ya pagado{pagadosCount > 1 ? "s" : ""}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
 
             {/* Selector modo */}
@@ -626,21 +669,16 @@ export default function Pagos({ showToast }) {
             )}
 
             {/* MODO POR PRODUCTO */}
-            {modo === "producto" && d.productos?.length > 0 && (
+            {modo === "producto" && d.productos?.length > 0 && (() => {
+              const pagadoMapProd = _buildPagadoMap(historialPagos, d.nombre);
+              const prodsPendientes = d.productos.filter(p => {
+                const pagadoEste = pagadoMapProd[_prodKey(p)] || 0;
+                return pagadoEste < (Number(p.subtotal) || 0);
+              });
+              return (
               <div>
                 <div style={{ background: "var(--surface-3)", borderRadius: 10, padding: "10px 14px", marginBottom: 10 }}>
-                  {d.productos.filter(p => {
-                    // Ocultar productos ya pagados completamente
-                    const idProd = String(p.id_producto || "");
-                    if (!idProd) return true;
-                    const pagadoEste = (historialPagos || [])
-                      .filter(h => (h.cliente || "").toLowerCase().trim() === (d.nombre || "").toLowerCase().trim() && h.producto_ref)
-                      .reduce((acc, h) => {
-                        const ref = String(h.producto_ref || "").split("|")[0].trim();
-                        return ref === idProd ? acc + (Number(h.monto) || 0) : acc;
-                      }, 0);
-                    return pagadoEste < (Number(p.subtotal) || 0);
-                  }).map((p, i, arr) => {
+                  {prodsPendientes.map((p, i, arr) => {
                     const key = prodKey(p);
                     return (
                       <div key={i} style={{
@@ -708,7 +746,8 @@ export default function Pagos({ showToast }) {
                   </button>
                 </div>
               </div>
-            )}
+              );
+            })()}
           </div>
         );
       })}
